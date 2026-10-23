@@ -1,0 +1,81 @@
+L4T Ubuntu 14.04 on Xiaomi Mi Pad 1 (mocha) — documentation and helper scripts
+=============================================================================
+
+This repository contains two kinds of material, licensed separately.
+
+-------------------------------------------------------------------------------
+1. Documentation (README.md, README.zh-CN.md, ARTIFACTS.md, docs/)
+-------------------------------------------------------------------------------
+
+Copyright (c) 2026 the contributors
+
+Licensed under the Creative Commons Attribution-ShareAlike 4.0 International
+License (CC BY-SA 4.0).
+
+You are free to:
+  * Share  — copy and redistribute the material in any medium or format
+  * Adapt  — remix, transform, and build upon the material for any purpose,
+             even commercially
+
+Under the following terms:
+  * Attribution — You must give appropriate credit, provide a link to the
+    license, and indicate if changes were made.
+  * ShareAlike — If you remix, transform, or build upon the material, you must
+    distribute your contributions under the same license as the original.
+
+Full license text: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+-------------------------------------------------------------------------------
+2. Scripts (scripts/*.sh)
+-------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 the contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+3. Third-party material (NOT covered by the licenses above)
+-------------------------------------------------------------------------------
+
+* U-Boot         — GPL-2.0+  (see the mocha-moze-boot project)
+* Linux kernel   — GPL-2.0   (NVIDIA L4T R24.1, "SmokeR24.1" build by arttttt)
+* L4T userspace  — NVIDIA L4T license
+* Device trees / initramfs derived from the L4T package:
+                  copyright NVIDIA Corporation and the original porters
+                  (Insei / DbIm, arttttt / ArtemkaVZM). Check their terms
+                  before redistributing those binaries.
+
+The files in artifacts/ are derivatives of the material above. If you cannot
+redistribute them under your local rules, delete artifacts/ and let users
+generate their own copies with the scripts in scripts/ — the build is
+bit-for-bit reproducible against the published SHA256SUMS.
+
+-------------------------------------------------------------------------------
+4. Safety notice
+-------------------------------------------------------------------------------
+
+Flashing bootloaders and partition images can permanently brick a device.
+Everything here was verified on one Xiaomi Mi Pad 1 (3 GB mod), but you are
+responsible for your own hardware. In particular:
+
+  * NEVER flash tos.img on mocha — it bricks the device.
+  * NEVER write the GPT.
+  * Keep a recovery path (fastboot + the read-only RAM installer) available.

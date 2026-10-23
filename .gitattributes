@@ -1,0 +1,16 @@
+# Normalise line endings: shell scripts and markdown must stay LF on every platform,
+# otherwise the scripts break on Linux/Android after a Windows checkout.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.dts   text eol=lf
+*.py    text eol=lf
+
+# binary artifacts - never mangle them
+*.dtb        binary
+*.img        binary
+*.cpio.gz    binary
+*.uImage     binary
+*.gz         binary

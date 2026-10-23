@@ -1,0 +1,4 @@
+88fff3bc182ee6c91f12b4f2959d50f8671cca808553bf0000c6ebfddc5344f0  artifacts/dtb-final-3gb-nopmoff.dtb
+c79697cfd93afb346266504ecc66ae0756c7b54c96bec911f8ded03856571966  artifacts/initramfs-mocha-data.cpio.gz
+26c4c15a07678d44808736b9efab8276edf9c9a82cc15d006f251a6a2f5f6edc  artifacts/kernel-original-uImage
+ca277399fde1b7b3015301ce4e2660a9c8c98819151978f2b069ca4dd30b1939  artifacts/uboot-l4t-3gb.img

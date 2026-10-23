@@ -1,0 +1,42 @@
+# ---- build outputs ----
+*.o
+*.su
+*.d
+*.tmp
+*.log
+build/
+out/
+work/
+
+# ---- files you must obtain yourself (see README "Requirements") ----
+# uncomment the next lines if you keep local copies of the vendor package
+L4T_R241/
+root_00.tar.gz
+*.tar.gz
+zImage
+*.cpio.gz
+
+# ---- prebuilt binaries ----
+# The artifacts/ folder is included on purpose (small, 9 MB) so people can
+# verify their own build against the published SHA256SUMS.
+# Uncomment the next line if you prefer to distribute scripts only:
+# artifacts/
+
+# ...but never ignore the artifacts we DO ship:
+!artifacts/*.cpio.gz
+!artifacts/*.dtb
+!artifacts/*
+
+# ---- OS / editor junk ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# ---- device dumps that must never be committed ----
+*.img.bak
+gpt.bin
+partition-table.bin
