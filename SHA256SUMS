@@ -2,3 +2,4 @@
 c79697cfd93afb346266504ecc66ae0756c7b54c96bec911f8ded03856571966  artifacts/initramfs-mocha-data.cpio.gz
 26c4c15a07678d44808736b9efab8276edf9c9a82cc15d006f251a6a2f5f6edc  artifacts/kernel-original-uImage
 ca277399fde1b7b3015301ce4e2660a9c8c98819151978f2b069ca4dd30b1939  artifacts/uboot-l4t-3gb.img
+ff28267e281ca3b511546b895a93f186eba30d91abbf15025b29d46168380f04  artifacts/nvwifibt.conf.fixed

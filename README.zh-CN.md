@@ -357,8 +357,16 @@ ps -ef | grep lightdm        # 桌面在跑
 | `04-build-dtb-nopmoff.sh` | **电源键修复**（删除 palmas 关机绑定） |
 | `05-build-uboot.sh` | 改 U-Boot 环境变量并生成 p22 镜像 |
 | `06-install-to-data.sh` | 安装到 p29 + WiFi 固件软链 |
+| `07-fix-login-greeter.sh` | 修复 16.04 升级后的 LightDM / 登录界面（自动登录 + greeter） |
+| `08-fix-bluetooth.sh` | **蓝牙修复**（去掉失效的低功耗模式路径） |
 
-「黑砖」问题的完整根因分析：**[docs/BUG-power-button.md](docs/BUG-power-button.md)**
+根因深度分析：
+
+* [docs/BUG-power-button.md](docs/BUG-power-button.md) —— 电源键黑砖的根因
+* [docs/L4T-LOGIN-GREETER-FIX.md](docs/L4T-LOGIN-GREETER-FIX.md) —— 黑屏登录界面、greeter 样式不对、
+  以及**进桌面 30 秒后又退回登录页**（16.04 专属问题）
+* [docs/L4T-BLUETOOTH-FIX.md](docs/L4T-BLUETOOTH-FIX.md) —— 蓝牙控制器无响应
+  （`Can't read local name`、所有 HCI 命令 `tx timeout`）：根因与修复
 
 ---
 
@@ -375,6 +383,7 @@ ps -ef | grep lightdm        # 桌面在跑
 | 只有 1 个核 | 刷了 `tos.img` 或用了非 L4T 内核 | 用原版内核，**不要**刷 `tos.img` |
 | 关机后电源键无反应 | `palmas_power_off` 的软关机状态 | 见 5.4（改 DTB） |
 | `apt` 找不到 armhf 包 | 档案库用错 | 用 `ubuntu-ports` |
+| 蓝牙无响应：`Can't read local name`、所有 HCI 命令 `tx timeout` | 低功耗模式（`sleep/lpm` + `--enable_lpm`）睡下去就不醒 | 跑 `scripts/08-fix-bluetooth.sh` 后重启 |
 
 ---
 

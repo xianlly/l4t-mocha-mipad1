@@ -358,8 +358,16 @@ Every script supports `--help` and validates its arguments:
 | `04-build-dtb-nopmoff.sh` | **power-button fix** (removes the palmas power-off binding) |
 | `05-build-uboot.sh` | U-Boot env + image for p22 |
 | `06-install-to-data.sh` | install to p29 + Wi-Fi firmware symlinks |
+| `07-fix-login-greeter.sh` | repair LightDM / unity-greeter after a 16.04 upgrade |
+| `08-fix-bluetooth.sh` | **Bluetooth fix** (removes the broken low-power-mode path) |
 
-Full root-cause write-up of the black-brick bug: [docs/BUG-power-button.md](docs/BUG-power-button.md).
+Deep-dive write-ups:
+
+* [docs/BUG-power-button.md](docs/BUG-power-button.md) — black-brick / power-button root cause
+* [docs/L4T-LOGIN-GREETER-FIX.md](docs/L4T-LOGIN-GREETER-FIX.md) — black login screen, wrong greeter,
+  and the desktop session exiting back to the login page ~30 s after login (16.04)
+* [docs/L4T-BLUETOOTH-FIX.md](docs/L4T-BLUETOOTH-FIX.md) — dead Bluetooth controller
+  (`Can't read local name`, `tx timeout` on every HCI command): root cause and fix
 
 ---
 
@@ -376,6 +384,7 @@ Full root-cause write-up of the black-brick bug: [docs/BUG-power-button.md](docs
 | Only 1 core | you flashed `tos.img` or used a non-L4T kernel | use the original kernel, do **not** flash `tos.img` |
 | Power button dead after shutdown | `palmas_power_off` soft-off state | see 5.4 (DTB property removal) |
 | `apt` cannot find armhf packages | wrong archive | use `ubuntu-ports` |
+| Bluetooth dead — `Can't read local name`, every HCI command `tx timeout` | low-power mode (`sleep/lpm` + `--enable_lpm`) never wakes | run `scripts/08-fix-bluetooth.sh`, then reboot |
 
 ---
 

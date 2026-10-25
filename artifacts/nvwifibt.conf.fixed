@@ -1,0 +1,28 @@
+description     "NVIDIA bluetooth/wifi init script"
+#
+# L4T on Xiaomi Mi Pad 1 (mocha / Tegra K1) - Bluetooth bring-up
+#
+# WORKING CONFIGURATION (verified on hardware).
+#
+# The stock script enabled low-power mode:
+#     echo 1 > /proc/bluetooth/sleep/lpm
+#     brcm_patchram_plus ... --enable_lpm --tosleep=50000 ...
+# The LPM wake path does not work on this board, so the BCM43341 controller
+# went to sleep and never answered another HCI command.  Every HCI command
+# timed out, including HCI Reset (0x0c03).
+#
+# Result of this configuration:
+#   hciconfig -a  ->  UP RUNNING PSCAN ISCAN, Name: 'tegra-ubuntu-0'
+#   hcitool cmd 0x03 0x0003  ->  HCI Event 0x0e (Command Complete)
+#   hcitool lescan  ->  discovers real nearby BLE devices
+#
+# Do NOT re-add --enable_lpm / --tosleep without testing: they are the
+# reason the controller appeared dead.  --patchram is not required for
+# normal operation either.
+#
+instance $SUBTASK
+
+script
+	exec /usr/sbin/rfkill unblock bluetooth
+	exec /usr/sbin/brcm_patchram_plus --enable_hci --scopcm=0,2,0,0,0,0,0,0,0,0 --baudrate 115200 --no2bytes /dev/ttyTHS2
+end script
