@@ -2,24 +2,27 @@ description     "NVIDIA bluetooth/wifi init script"
 #
 # L4T on Xiaomi Mi Pad 1 (mocha / Tegra K1) - Bluetooth bring-up
 #
-# WORKING CONFIGURATION (verified on hardware).
+# WORKING CONFIGURATION (verified at boot on 2026-10-25 16:04 and 16:22).
 #
-# 1) The stock script enabled low-power mode:
+# 1) DO NOT re-add low-power mode.  The stock file had:
 #        echo 1 > /proc/bluetooth/sleep/lpm
 #        brcm_patchram_plus ... --enable_lpm --tosleep=50000 ...
-#    The LPM wake path does not work on this board, so the BCM43341 went to
-#    sleep and never answered another HCI command again -- every command,
-#    including HCI Reset (0x0c03), timed out.
+#    The LPM wake path does not work on this board: the BCM43341 sleeps and
+#    never answers another HCI command (even HCI Reset 0x0c03 times out).
 #
-# 2) --patchram is NOT usable here: /lib/firmware/BCM4350C0.hcd targets a
-#    different chip and brcm_patchram_plus hangs on it forever.  The patch is
-#    not needed for normal operation.
+# 2) DO NOT add --patchram: /lib/firmware/BCM4350C0.hcd targets a different
+#    chip and brcm_patchram_plus hangs on it forever.  It is not needed.
 #
-# 3) The controller still boots with a placeholder address
-#    43:50:C0:00:00:00, which makes inquiry responses unusable for other
-#    devices (the tablet looks invisible).  bt-mac-setup.sh writes a real
-#    BD_ADDR derived from the WiFi MAC, sets a sane Class of Device and
-#    enables inquiry+page scan.
+# 3) rfkill lives at /usr/sbin/rfkill on 14.04 (NOT /sbin/rfkill).
+#
+# 4) This job is started by /etc/udev/rules.d/99-nv-wifibt.rules when the
+#    bluedroid_pm rfkill state changes.  Do not add extra rfkill calls here:
+#    flipping the state makes that same rule fire `initctl stop ...` and kill
+#    this job.
+#
+# 5) post-start writes a valid BD_ADDR (fixed, see bt-mac-setup.sh): the
+#    controller otherwise reports the placeholder 43:50:C0:00:00:00 and other
+#    devices ignore its inquiry responses.
 #
 instance $SUBTASK
 

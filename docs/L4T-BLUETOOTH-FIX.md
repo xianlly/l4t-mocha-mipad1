@@ -232,16 +232,89 @@ sudo hcitool cmd 0x04 0x0009      # Read BD_ADDR
   01 09 10 00 34 22 11 4C 90 00    ← 00:90:4C:11:22:34
 ```
 
-### 5.3 MAC 从哪来
+### 5.3 MAC 从哪来（⚠️ 必须硬编码，不能从 WiFi 推导）
 
-用 **WiFi MAC 末字节 +1**，同一 OUI —— 这是给组合芯片分配蓝牙地址的常规做法：
+**第一版尝试：从 WiFi MAC 末字节 +1 推导**
 
 ```
 wlan0:  00:90:4C:11:22:33
 BT:     00:90:4C:11:22:34
 ```
 
-`00:90:4C` 是 NVIDIA/Epigram 的 OUI，是这块板子真实的厂商前缀。
+看起来合理（`00:90:4C` 是 NVIDIA/Epigram 的 OUI，这块板子真实的厂商前缀），
+**但在真机上是错的**：
+
+```
+boot A: wlan0 = 00:90:4c:16:70:01  ->  BT = 00:90:4c:16:70:02
+boot B: wlan0 = 00:90:4c:11:22:33  ->  BT = 00:90:4c:11:22:34
+```
+
+**`bcmdhd` 的 nvram 里没有 MAC，所以每次开机都会自己编一个新的 WiFi 地址。**
+
+后果：BT 地址跟着变，**所有已配对设备（耳机、手表）每次开机都要重新配对**。
+
+**最终做法：在 `bt-mac-setup.sh` 里写死一个地址**
+
+```sh
+BT_MAC="00:90:4C:16:70:02"
+```
+
+想改的话改这一行，或者写 `/etc/bt-mac`（脚本会优先读它，方便批量部署）。
+
+实测验证（同一台设备，wlan0 与 BT 无关）：
+
+```
+wlan0:  00:90:4c:11:22:33
+BT:     00:90:4C:16:70:02     ← 固定不变
+```
+
+### 5.3.1 ⚠️ 开机是怎么触发蓝牙的（很反直觉，必须知道）
+
+不是 upstart 的 `start on`，而是 **udev 规则**：
+
+```bash
+# /etc/udev/rules.d/99-nv-wifibt.rules
+ACTION=="add",    SUBSYSTEM=="sdio",   ATTR{vendor}=="0x02d0" \
+    RUN+="/sbin/initctl start nvwifibt SUBTASK=register BCMCHIP=$attr{device}"
+
+ACTION=="change", SUBSYSTEM=="rfkill", ATTR{name}=="bluedroid_pm*", ATTR{state}=="1" \
+    RUN+="/sbin/initctl start nvwifibt SUBTASK=power"
+ACTION=="change", SUBSYSTEM=="rfkill", ATTR{name}=="bluedroid_pm*", ATTR{state}=="0" \
+    RUN+="/sbin/initctl stop  nvwifibt SUBTASK=power"
+```
+
+**蓝牙只在 `bluedroid_pm` 的 rfkill 状态"发生变化"时才启动。**
+
+由此产生两个坑：
+
+| 坑 | 现象 | 原因 |
+|---|---|---|
+| **有时有 `hci0`、有时没有** | 同样配置，有的开机正常，有的完全没有设备 | rfkill 状态没变化 → 规则不触发 → 任务从不启动 |
+| **任务自杀** | 任务刚起来就消失 | unit 里写了 `rfkill unblock bluetooth` → 状态 1→0 变化 → **同一条规则把它停掉了** |
+
+**所以 `bt-mac-setup.sh` 里绝对不能调用 `rfkill`**——那会触发 stop 规则、
+把正在运行它的任务杀掉。rfkill 只在 unit 的 `script` 里处理一次。
+
+### 5.3.2 ⚠️ `rfkill` 的路径是 `/usr/sbin/rfkill`
+
+14.04 上 **没有** `/sbin/rfkill`：
+
+```bash
+$ ls -l /sbin/rfkill
+ls: cannot access '/sbin/rfkill': No such file or directory
+$ command -v rfkill
+/usr/sbin/rfkill
+```
+
+写错路径的后果（实测）：
+
+```
+/proc/self/fd/9: 2: /sbin/rfkill: not found
+bt-mac-setup: hci0 never appeared, giving up
+```
+
+任务进入 `respawn` 死循环，蓝牙完全起不来。
+
 
 ### 5.4 顺手把设备类别设对
 
