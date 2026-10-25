@@ -325,7 +325,70 @@ Failed to load plugin 'libgstnvcamera.so':
 | 写符号 shim（`LD_PRELOAD`） | ❌ 69 个符号里有大量 `NvRmStream*`/`NvRmSurface*` 真实功能 |
 | 整体降级到 R21.5 驱动栈 | ⚠️ 会破坏显示/GPU —— 现在这套 2019 版驱动正是让这块板子能跑起来的前提 |
 
-### 4.5 结论
+### 4.5 完整 R21.5 用户空间（隔离沙盒）——走得最远的一次
+
+用 `GST_REGISTRY` 私有 registry + `GST_PLUGIN_SYSTEM_PATH_1_0` 私有插件目录 +
+`LD_LIBRARY_PATH=/opt/camtest/libs`（40 个 R21.5 库 + 配对的老 `libcuda.so.1.1`），
+**完全不动系统文件**，可以做到：
+
+```
+✅ libgstnvcamera.so（R21.5）加载成功
+   Long-name  Nvidia Camera Source
+   Version    1.2.0
+
+✅ 真的和 /dev/camera.pcl 通信了
+   NvCamHwReadLayout: PCLLK_IOCTL_LAYOUT_RD -1 <22>
+   NvOdmImagerDeviceDetect: PCL layout not empty.
+```
+
+**这已经越过了"camera_daemon 缺失"那道墙。** 剩下两个新障碍：
+
+**(1) 板子被识别成 Ardbeg，于是选错传感器**
+
+```
+IMX135 ****  Can not open camera device: No such file or directory
+NvOdmImagerOpenExpanded 462: Sensor ERR
+```
+
+`strace` 抓到了确切行为：
+
+```
+open("/dev/imx135", O_RDWR) = -1 ENOENT
+```
+
+传感器型号的**选择**是基于板子型号的：`libnvodm_imager.so` 里 `Ardbeg`
+字符串只出现一次，Ardbeg（Shield Tablet）的主摄是 **IMX135**。
+我们的 DTB 来自 Ardbeg BSP，所以被当成 Ardbeg，主摄被选成 IMX135。
+
+> 注意：R21.5 的 `libnvodm_imager.so` 里 **`/dev/imx179` 和 `/dev/ov5693` 都在**
+> （2019 版也有），所以不是"不认识传感器"，而是**按板子选了默认主摄**。
+
+**(2) 2016 的库与内核 PCL 的 ioctl 不匹配**
+
+```
+pcl-generic pcl-generic: camera_ioctl unsupported ioctl: c0146f79
+```
+
+`0xc0146f79`：方向 RW，长度 0x14，type `'o'`(0x6f)，nr `0x79`。
+内核的 `pcl-generic` 不认识这个 ioctl，`PCLLK_IOCTL_LAYOUT_RD` 返回
+`-1 <22>`（EINVAL）—— 说明**内核的 PCL ABI 是比 R21.5 更新的版本**。
+
+**(3) 混搭两代库必然级联**
+
+试过把设备自带的 2019 版 `libnvodm_imager.so` 换进去（它认识 IMX179，
+且更接近内核 PCL 版本），立刻级联：
+
+```
+Failed to load plugin 'libgstnvcamera.so':
+  libnvcamerautils.so: undefined symbol: NvOsThreadSetName
+```
+
+2019 的 `libnvcamerautils.so` 需要的符号，2016 的 `libnvos.so` 没有。
+反过来（用 2019 的 `libnvrm`）又会缺 `NvOsCancelThroughputHint`。
+
+**两代库无法插值混搭，这是硬约束。**
+
+### 4.6 结论
 
 ```
 内核：L4T 21.x 风格（PCL）
@@ -335,6 +398,10 @@ Failed to load plugin 'libgstnvcamera.so':
 
 **要让摄像头工作，需要一个与内核同代的、包含 `camera_daemon` 的完整用户空间。**
 在这个 rootfs 上无法通过改设备树或替换单个库达成。
+
+**最接近成功的一次**（4.5 节）证明了：只要有**配对的一整套**用户空间，
+这条路是通的 —— 插件能加载、能读 PCL 布局、能打开 `/dev/camera.pcl`。
+缺的只是"同一代"这一条。
 
 ---
 
