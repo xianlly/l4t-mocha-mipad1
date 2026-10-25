@@ -9,6 +9,34 @@
 
 ## 一、快照信息
 
+### 当前版本（v2，2026-10-25 18:10）
+
+| 项目 | 值 |
+|---|---|
+| 文件名 | `root-1404-v2.tar.gz` |
+| 大小 | 1,741,593,604 字节（1.62 GiB） |
+| SHA256 | `f94ed26cdf39774647b258f6e20bc1c251a680a8e141f328115ec797a9a8e25f` |
+| 归档条目 | 153,071（文件 + 目录 + 软链） |
+| 系统版本 | Ubuntu 14.04.6 LTS (Trusty) |
+| 内核 | 3.10.108_SmokeR24.1-V3.5.1（预编译，未改） |
+| 格式 | `tar`（gzip -1 压缩），**不是** cpio |
+| 打包方式 | 在线打包（`/` 就是 p29:/l4t/root），tar 零警告，`gzip -t` 通过 |
+
+**v2 相比 v1 多了什么：**
+
+| 增量 | 说明 |
+|---|---|
+| **固定 BT MAC** | `bt-mac-setup.sh` v5，硬编码 `00:90:4C:16:70:02`，不再随 WiFi MAC 变化（见 `L4T-BLUETOOTH-FIX.md` 5.3） |
+| **蓝牙开机确定性** | `/etc/init/nvwifibt.conf` 用 `/usr/sbin/rfkill`（原来写错成 `/sbin/rfkill` 会导致任务死循环） |
+| **摄像头设备节点** | DTB 加 `num-channels = <2>` → `/dev/video0`、`/dev/video1`、`/dev/camera.pcl` 存在（见 `L4T-CAMERA-INVESTIGATION.md`） |
+| `v4l-utils` / `strace` | 已安装，便于以后调试 |
+| `/opt/camtest`（79 MB） | 摄像头实验沙盒：40 个 R21.5 库 + 无 daemon 版插件，以后拿到匹配的包可直接测试 |
+
+> 体积比 v1 大 408 MB，主要是 `/var/cache/apt/archives`（328 MB）和
+> `/var/lib/apt/lists`（80 MB）—— 可再生的 apt 缓存，保留可以离线重装。
+
+### 历史版本（v1，2026-10-25 16:00）
+
 | 项目 | 值 |
 |---|---|
 | 文件名 | `root-1404-final.tar.gz` |
@@ -30,13 +58,14 @@
 | Ubuntu 14.04.6 LTS（已 `apt upgrade`） | ✅ |
 | 4 核 / 2.9 GiB 可用内存 | ✅ |
 | GPU 硬件加速（nvhost / tegra_dc） | ✅ |
-| **蓝牙可用**（去 LPM + 自动写 BD_ADDR） | ✅ 见 `L4T-BLUETOOTH-FIX.md` |
+| **蓝牙可用 + BD_ADDR 固定**（去 LPM + 硬编码 MAC） | ✅ 见 `L4T-BLUETOOTH-FIX.md` |
+| **`/dev/video0`、`/dev/video1`、`/dev/camera.pcl`** | ✅ v2 起（采集仍缺 `camera_daemon`，见 `L4T-CAMERA-INVESTIGATION.md`） |
 | apt 源 = 清华 TUNA（含 universe/multiverse） | ✅ |
 | Unity 桌面 + compiz | ✅ |
 | WiFi（bcmdhd） | ✅ |
 | 触摸屏（atmel-maxtouch） | ✅ |
 | 声音（tegra-rt5671） | ✅ |
-| 摄像头 | ❌ 无 `/dev/video*`（DTB 缺 camera-platform 模块定义） |
+| 摄像头实际采集 | ❌ 缺闭源 `camera_daemon` |
 
 ## 快照**不**包含什么
 
@@ -45,10 +74,16 @@
 | 文件 | 大小 | SHA256 |
 |---|---|---|
 | `uImage-desktop` | 7,818,528 | `26c4c15a07678d44808736b9efab8276edf9c9a82cc15d006f251a6a2f5f6edc` |
-| `mocha-desktop.dtb` | 144,519 | 3 GB 内存节点 + 无 pmoff（防黑砖） |
+| `mocha-desktop.dtb`（v2 用的，摄像头版） | 144,547 | `37941f97ca9b52476f8eff1b9bdf8407aee07225adfde2509ea09aa01da09777` |
+| `mocha-desktop.dtb`（保守版，无摄像头改动） | 144,519 | `88fff3bc182ee6c91f12b4f2959d50f8671cca808553bf0000c6ebfddc5344f0` |
 | `initramfs.cpio.gz` | 1,028,300 | `c79697cfd93afb346266504ecc66ae0756c7b54c96bec911f8ded03856571966` |
 
 **只要这些文件还在，rootfs 换了也不影响启动。**
+
+> ⚠️ 打包时 `/` 就是 p29 上的 `/l4t/root`，而 p29 又挂在 `/data` 和 `/mnt/p29`。
+> 打包脚本必须排除 `./data`、`./mnt/*`，否则 tar 会递归进整个 rootfs。
+> v2 已校验：归档里 `./data` 条目为 0。
+
 
 ---
 
@@ -87,10 +122,10 @@ $SSH $U 'blockdev --setrw /dev/mmcblk0; mkdir -p /mnt
          mount | grep -q " /mnt " || mount /dev/mmcblk0p29 /mnt'
 
 # 上传（约 1-2 分钟，速率 15 MB/s 左右）
-cat artifacts/root-1404-final.tar.gz | $SSH $U 'cat > /mnt/l4t/root-1404-final.tar.gz'
+cat artifacts/root-1404-v2.tar.gz | $SSH $U 'cat > /mnt/l4t/root-1404-v2.tar.gz'
 
 # 校验（必须等于 906695d0...）
-$SSH $U 'sha256sum /mnt/l4t/root-1404-final.tar.gz'
+$SSH $U 'sha256sum /mnt/l4t/root-1404-v2.tar.gz'
 ```
 
 ### 3.4 确认启动文件还在（**关键**）
@@ -120,7 +155,7 @@ $SSH $U 'rm -rf /mnt/l4t/root/* /mnt/l4t/root/.[!.]*'
 # 解压（用 busybox gzip，因为 RAM 环境里没有独立的 gzip 二进制）
 $SSH $U 'mkdir -p /mnt/l4t/root && \
          cd /mnt/l4t/root && \
-         busybox gzip -dc /mnt/l4t/root-1404-final.tar.gz | tar -xf -'
+         busybox gzip -dc /mnt/l4t/root-1404-v2.tar.gz | tar -xf -'
 ```
 
 约 8-12 分钟。
@@ -219,6 +254,39 @@ setsid sh -c 'tar -cf - -C /mnt/l4t/root . | busybox gzip -1 \
 
 ⚠️ busybox **没有 `nohup`**，只能用 `setsid`。
 
+---
+
+## 5.5 v2 用的是「在线打包」（更简单，不用进 fastboot）
+
+v1 是在 RAM 安装器里离线打包的。v2 发现**根本不需要进 fastboot**：
+
+运行中的系统里 `/` **就是** p29 上的 `/l4t/root`，所以直接在线打包即可。
+输出写到 `/mnt/p29/`（对应 p29 根目录，**不在 `/` 里面**，不会递归）。
+
+```sh
+tar -cf - -C / \
+    --exclude=./proc/* --exclude=./sys/* --exclude=./dev/* \
+    --exclude=./run/*  --exclude=./mnt/*  --exclude=./media/* \
+    --exclude=./data   --exclude=./tmp/* \
+    . 2> /mnt/p29/snap.err | gzip -1 > /mnt/p29/root-1404-v2.tar.gz
+```
+
+**⚠️ `--exclude=./data` 绝对不能漏！** p29 同时挂在 `/data`，里面就有
+`/data/l4t/root` —— 不排除会让 tar 递归进整个 rootfs。
+
+打包后用这三条验证：
+
+```bash
+gzip -t /mnt/p29/root-1404-v2.tar.gz              # 压缩流完整性
+tar -tzf /mnt/p29/root-1404-v2.tar.gz | wc -l     # 条目数
+tar -tzf /mnt/p29/root-1404-v2.tar.gz | grep -c '^\./data/'   # 必须是 0
+```
+
+> 注意 `rc=$?` 在 `tar | gzip` 管道里拿到的是 **gzip** 的状态，不是 tar 的。
+> 要判断 tar 是否干净，看 `stderr` 是否为空（v2 是空的）。
+
+实测：4.6 GB → 1.62 GiB，4 分 52 秒（gzip -1，K1 四核）。
+
 ### 5.4 监控用 `ps`，不要用 `pgrep -c`
 
 busybox 的 `pgrep` 不可靠（进程还在时也可能返回 0）。用：
@@ -229,11 +297,10 @@ ps 2>/dev/null | grep -cE "[t]ar -cf|[g]zip -1"
 
 ### 5.5 实测数据
 
-```
-源大小:     2.7 GB / 87,660 文件
-压缩后:     1.16 GiB（gzip -1）
-耗时:       760 秒（约 13 分钟）
-```
+| 版本 | 源大小 | 压缩后 | 耗时 | 方式 |
+|---|---|---|---|---|
+| v1 | 2.7 GB / 87,660 文件 | 1.16 GiB（gzip -1） | 760 秒（约 13 分钟） | RAM 安装器离线打包 |
+| v2 | 4.6 GB / 153,071 条目 | **1.62 GiB**（gzip -1） | **292 秒**（4 分 52 秒） | 在线打包（见 5.5 节上方） |
 
 ---
 

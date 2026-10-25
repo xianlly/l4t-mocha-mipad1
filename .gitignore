@@ -40,3 +40,6 @@ desktop.ini
 *.img.bak
 gpt.bin
 partition-table.bin
+
+# ---- large local rootfs snapshots: distribute out-of-band, never in git ----
+artifacts/*.tar.gz

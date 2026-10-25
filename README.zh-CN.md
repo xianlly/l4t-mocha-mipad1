@@ -368,7 +368,7 @@ ps -ef | grep lightdm        # 桌面在跑
 * [docs/L4T-BLUETOOTH-FIX.md](docs/L4T-BLUETOOTH-FIX.md) —— 蓝牙控制器无响应
   （`Can't read local name`、所有 HCI 命令 `tx timeout`）：根因与修复
 * [docs/L4T-1404-ROOTFS.md](docs/L4T-1404-ROOTFS.md) —— **刷入即用的 14.04 rootfs 快照**
-  （1.16 GiB，含全部修复）：恢复步骤、验证清单、常见坑
+  （v2，1.62 GiB，含全部修复）：恢复步骤、验证清单、常见坑
 * [docs/L4T-1604-ROOTFS.md](docs/L4T-1604-ROOTFS.md) —— 16.04 rootfs 快照（研究参考）
 * [docs/L4T-CAMERA-INVESTIGATION.md](docs/L4T-CAMERA-INVESTIGATION.md) —— 摄像头：确认传感器
   （IMX179 / OV5693）、让 `/dev/video0` 出现的 `num-channels` 设备树修复，
