@@ -371,6 +371,9 @@ Deep-dive write-ups:
 * [docs/L4T-1404-ROOTFS.md](docs/L4T-1404-ROOTFS.md) — **ready-to-flash 14.04 rootfs snapshot**
   (1.16 GiB, all fixes included): restore procedure, verification, known pitfalls
 * [docs/L4T-1604-ROOTFS.md](docs/L4T-1604-ROOTFS.md) — 16.04 rootfs snapshot (research reference)
+* [docs/L4T-CAMERA-INVESTIGATION.md](docs/L4T-CAMERA-INVESTIGATION.md) — camera: sensors identified
+  (IMX179 / OV5693), the `num-channels` DT fix that creates `/dev/video0`, and why capture is
+  still blocked (`camera_daemon` is missing and cannot be substituted)
 
 ---
 
