@@ -405,13 +405,204 @@ Failed to load plugin 'libgstnvcamera.so':
 
 ---
 
-## 五、如果以后要继续
+## 四·补、找到了真正的 `nvcamera-daemon`（R24.1 armhf）—— 但撞上驱动代际墙
 
-| 路线 | 说明 |
+前面第四章的结论是"缺闭源 daemon"。这一节是**后续的续篇**：daemon 找到了、跑起来了、
+协议也通了，最后卡在**内核传感器驱动的代际**上。
+
+### 4.7 daemon 从哪来（可复现）
+
+L4T 24.1 有一个 **32 位（armhf）** 分支，包名写在官方 Quick Start 指南里：
+
+```
+https://developer.download.nvidia.cn/embedded/L4T/r24_Release_v1.0/24.1_32bit/l4t_quick_start_guide.txt
+  → sudo tar xpf Tegra210_Linux_R24.1.0_armhf.tbz2
+```
+
+**无需登录，直接可下**（86,832,671 字节）：
+
+```
+https://developer.download.nvidia.cn/embedded/L4T/r24_Release_v1.0/24.1_32bit/Tegra210_Linux_R24.1.0_armhf.tbz2
+sha256 b28328b9ddd02b16bcc6da308e96920124378066992cb8328e7ee7b07d217854
+```
+
+解开后在 `Linux_for_Tegra/nv_tegra/nvidia_drivers.tbz2` 里：
+
+```
+usr/sbin/nvcamera-daemon       42,764 字节
+  ELF 32-bit ARM, armhf, interpreter /lib/ld-linux-armhf.so.3
+  /tmp/nvcamera_socket 引用: 1        ← 和插件同一个 socket
+  RESP_NVCAM_* 引用:       17        ← 服务端协议完全对应
+  sha256 d125bb7790af7405ea5613a195e6824da34c1c8d89a43b1c5693fcca2653203c
+```
+
+> 之前搜不到，是因为名字是 **`nvcamera-daemon`（连字符）**，不是 `camera_daemon`
+> 也不是 `nvcamera_daemon`。
+
+**依赖全部现成**：`libscf.so`、`libnvrm.so`、`libnvos.so`、`libnvddk_2d_v2.so`
+在我们的 2019 版驱动栈里都有，`ldd` 零缺失，直接就能跑。
+
+```bash
+sudo cp nvcamera-daemon /usr/sbin/ && sudo chmod 755 /usr/sbin/nvcamera-daemon
+sudo -b sh -c "/usr/sbin/nvcamera-daemon > /tmp/nvcd.log 2>&1"
+ls -l /tmp/nvcamera_socket      # srwxrwxrwx root root → 成功
+```
+
+> ⚠️ 用 `setsid ... &` 放在 `sudo -S sh -c` 里活不下来，进程会立刻消失。
+> 用 `sudo -b` 才是干净的后台化方式。
+
+### 4.8 daemon 起来之后，错误逐层暴露（每一层都是真进展）
+
+| 阶段 | daemon 报错 | 说明 |
+|---|---|---|
+| 0 | `Connecting to camera_daemon failed` | 没有 daemon |
+| 1 | `NvPclHwGetModuleList: No module found` / `Failed to get module list from a valid source` | DT 缺 `modules` 枚举节点 |
+| 2 | `Could not map module to ISP config string` + `could not read property [sensor_model]` | 读到模块了，缺 `sensor_model` |
+| 3 | `Sensor_InitializeDevNode: Failed to open dev node '/dev/video0'` + `NvPclDriver_V4L2_Sensor_Initialize: Failure` | 图通了但**没有 V4L2 subdev** |
+| 4 | `no subdev found in graph` 消失，但 `/dev/video*` 也消失 | 见下 |
+
+**第 1 步的根因**（从 `libnvodm_imager.so` 的字符串里挖出来的）：
+
+```
+/proc/device-tree/tegra-camera-platform/modules     ← 就是那个 "valid source"
+```
+
+**这些属性是给用户空间读的，不是给内核读的** —— 所以内核"不认识 `drivernode` /
+`pcl_id` / `proc-device-tree`"完全不影响，只要 `/proc/device-tree` 里有就行。
+
+补齐的 DT 结构（已实测内核能解析）：
+
+```dts
+tegra-camera-platform {
+    compatible = "nvidia, tegra-camera-platform";
+    num-channels = <2>;
+    modules {
+        module0 {
+            badge = "imx179_rear";  position = "rear";  orientation = <0>;
+            drivernode0 {
+                pcl_id = "v4l2_sensor";
+                proc-device-tree = "/proc/device-tree/i2c@7000c500/imx179@10";
+            };
+        };
+        module1 { /* ov5693 front, 同构 */ };
+    };
+};
+
+i2c@7000c500 {
+    imx179@10 {
+        devnode = "video0";          /* libnvodm_imager 要 */
+        sensor_model = "imx179";
+        /* + vana/vdig/vif-supply（从 regulator-consumer 表反推） */
+        ports { port@0 { endpoint {
+            csi-port = <0>; bus-width = <4>; data-lanes = <1 2 3 4>;
+            remote-endpoint = <&vi_in0>;
+        }; }; };
+    };
+};
+
+vi {
+    ports {
+        port@0 { endpoint { csi-port = <0>; bus-width = <4>;
+                            remote-endpoint = <&imx179_out>; }; };
+        port@1 { endpoint { csi-port = <1>; bus-width = <2>;
+                            remote-endpoint = <&ov5693_out>; }; };
+    };
+};
+```
+
+**内核确认全认**（`strings vmlinux.bin`）：
+
+```
+remote-endpoint ✓  csi-port ✓  bus-width ✓  data-lanes ✓  num-channels ✓
+内核函数：tegra_vi_graph_build_links / of_graph_parse_endpoint / of_graph_get_next_endpoint
+```
+
+**刷入后内核日志（图真的建起来了）**：
+
+```
+vi vi: parsing node /host1x/vi
+vi vi: handling endpoint /host1x/vi/ports/port@0/endpoint
+vi vi: handling endpoint /host1x/vi/ports/port@1/endpoint
+vi vi: parsing node /i2c@7000c500/imx179@10
+vi vi: handling endpoint /i2c@7000c500/imx179@10/ports/port@0/endpoint
+vi vi: parsing node /i2c@7000c500/ov5693@36
+vi vi: handling endpoint /i2c@7000c500/ov5693@36/ports/port@0/endpoint
+```
+
+`warning: no subdev found in graph` **彻底消失**，`/dev/media0` 也出现了。
+
+### 4.9 最后的墙：内核传感器驱动是 PCL 代，daemon 要 V4L2-subdev 代
+
+图建好后，`/dev/video0`、`/dev/video1` 反而**消失**了（之前是 TPG 模式给的假节点），
+`/dev/v4l-subdev*` 从来就没有：
+
+```
+/sys/bus/i2c/devices/2-0010/driver -> bus/i2c/drivers/imx179   ← 驱动绑定成功
+但没有注册 v4l2_async subdev → VI 无法建 link → 不创建 video 节点
+```
+
+daemon 的日志把这条链写得很清楚：
+
+```
+Sensor_InitializeDevNode: Failed to open dev node '/dev/video0'; No such file or directory
+Sensor_InitializeDevNode: Failed to open dev node '/dev/camera/'; trying alternate default location
+Sensor_InitializeDevNode: Failed.  Unable to locate dev node ''; Is a directory
+NvPclDriver_V4L2_Sensor_Initialize: Failure ---------------------
+NvPclDriverInitializeData: Unable to initialize driver v4l2_sensor
+```
+
+**根本矛盾：**
+
+```
+我们的内核：  imx179 驱动是 NVIDIA PCL 风格（Tegra124 / 21.x 代）
+              → 注册给 PCL，不注册 v4l2_async subdev
+
+R24 的 daemon：pcl_id = "v4l2_sensor"
+              → 需要真正的 V4L2 subdev（Tegra210 / 24.x 代）
+              → 找不到 → 打不开 /dev/videoN
+```
+
+**而且 PCL 这条路也被自己的 DT 节点堵住了：**
+
+```
+i2c i2c-2: Failed to register i2c client pcl_IMX179 at 0x10 (-16)     ← EBUSY
+pcl-generic: camera_new_device cannot allocate client: pcl_IMX179 bus 2, 10
+```
+
+PCL 想自己创建 i2c 客户端，但 `imx179@10` 这个 DT 节点已经占了地址。
+**两条路互斥，而这个内核的传感器驱动只走 PCL。**
+
+### 4.10 严格结论
+
+**不是"配置没调对"，而是缺同代二进制。** 三个层次的状态：
+
+| 层次 | 状态 |
 |---|---|
-| **找 R24.1 的 `camera_daemon`** | 必须是 armhf、与 `3.10.108` 内核匹配的版本；NVIDIA 闭源，只能从完整 BSP 里拿 |
-| **找带 camera 的 ardbeg/mocha L4T 镜像** | 同代完整用户空间，整体替换风险高 |
-| **用 Android 侧验证硬件** | Android 下摄像头正常，说明硬件与内核驱动都没问题 |
+| 设备树（图 / modules / 供电 / devnode） | ✅ **已全部做完**，内核逐条确认解析成功 |
+| 内核传感器驱动 | ❌ **无法补** —— 内核是预编译的 `3.10.108_SmokeR24.1`，不能重编；要 v4l2-subdev 版只能换内核 |
+| 用户空间 | ❌ 已有 R24 daemon，但它要的 V4L2 subdev 内核给不了 |
+
+**理论上还剩三条路：**
+
+1. 拿到生成 `root_00.tar.gz` 的那个 L4T 包（与内核同源，一定匹配）
+2. 换一个带 v4l2-subdev 传感器驱动的内核（要内核源码 + 交叉编译，还要重做 3 GB 内存 /
+   显示 / 防黑砖全部补丁 —— 风险极高）
+3. 自己写 PCL 用户空间客户端（用 `kernel_src.tbz2` 里的 ioctl 定义直接操作
+   `/dev/camera.pcl`）—— 可行，但工作量以周计
+
+**在"预编译内核 + 现成 rootfs"这个组合下，摄像头到这里就到头了。**
+
+### 4.11 仓库里留下的产物
+
+| 文件 | 说明 |
+|---|---|
+| `artifacts/nvcamera-daemon` | R24.1 armhf daemon（42 KB），sha256 `d125bb77…` |
+| `artifacts/dtb-3gb-camera-modules.dtb` | 含 modules + graph 的设备树，sha256 `99835729…`（会丢掉 /dev/video*） |
+| `artifacts/dtb-3gb-camera.dtb` | **推荐保留的**：`37941f97…`，有 /dev/video0/1/camera.pcl |
+| `artifacts/dtb-final-3gb-nopmoff.dtb` | 最保守：摄像头完全关闭 `88fff3bc…` |
+
+---
+
 
 ## 六、当前状态（诚实记录）
 
