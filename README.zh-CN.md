@@ -384,6 +384,7 @@ ps -ef | grep lightdm        # 桌面在跑
 | 关机后电源键无反应 | `palmas_power_off` 的软关机状态 | 见 5.4（改 DTB） |
 | `apt` 找不到 armhf 包 | 档案库用错 | 用 `ubuntu-ports` |
 | 蓝牙无响应：`Can't read local name`、所有 HCI 命令 `tx timeout` | 低功耗模式（`sleep/lpm` + `--enable_lpm`）睡下去就不醒 | 跑 `scripts/08-fix-bluetooth.sh` 后重启 |
+| 蓝牙能工作但别的设备搜不到 | `BD Address: 43:50:C0:00:00:00` —— 手机丢弃带这个占位地址的 inquiry 响应 | `scripts/08-fix-bluetooth.sh` 会每次开机自动写有效 BD_ADDR |
 
 ---
 

@@ -170,18 +170,160 @@ sudo hcitool cmd 0x04 0x0005      # Read Buffer Size
 
 ---
 
-## 五、遗留问题
+## 五、让设备能被搜到（`BD_ADDR` 无效问题）
 
-| 项目 | 状态 | 说明 |
+修完 LPM 后 `hciconfig` 已经很漂亮了，但**用手机搜不到**：
+
+```
+hci0:   BD Address: 43:50:C0:00:00:00     ← 后三字节全 0
+        UP RUNNING PSCAN ISCAN
+        Name: 'tegra-ubuntu-0'
+```
+
+### 5.1 为什么搜不到
+
+蓝牙 inquiry 响应报文里必须带发起方自己的 `BD_ADDR`：
+
+```
+手机发 Inquiry
+   ↓
+平板回 Inquiry Response（携带 BD_ADDR = 43:50:C0:00:00:00）
+   ↓
+手机系统判定这个地址无效 → 静默丢弃
+   ↓
+看起来"隐藏"了
+```
+
+`43:50:C0:00:00:00` 是 BCM43341 ROM 的占位地址。真机上这个地址的来源全都缺失：
+
+| 来源 | 状态 |
+|---|---|
+| ROM 默认值 | `43:50:C0:00:00:00`（无效） |
+| `/mnt/factory/bluetooth/bt_mac.txt` | p18 分区 **全是 0**，文件不存在 |
+| `/proc/device-tree/chosen/nvidia,bluetooth-mac` | DTB 里没有这个节点 |
+| `/persist`（p16） | 只有序列号和传感器校准，无 MAC |
+| `.hcd` 固件补丁 | 不兼容，不能用 |
+
+### 5.2 解决：用 Broadcom 厂商命令写 MAC
+
+```bash
+# Broadcom Write BD_ADDR = 0xFC01（ogf 0x3f, ocf 0x0001）
+# HCI 里 BD_ADDR 是小端序，所以要倒着发
+sudo hcitool cmd 0x3f 0x0001 0x34 0x22 0x11 0x4c 0x90 0x00
+```
+
+成功时返回：
+
+```
+< HCI Command: ogf 0x3f, ocf 0x0001, plen 6
+  34 22 11 4C 90 00
+> HCI Event: 0x0e plen 4
+  01 01 FC 00            ← Command Complete, status 0x00
+```
+
+读回验证：
+
+```bash
+sudo hcitool cmd 0x04 0x0009      # Read BD_ADDR
+```
+
+```
+> HCI Event: 0x0e plen 10
+  01 09 10 00 34 22 11 4C 90 00    ← 00:90:4C:11:22:34
+```
+
+### 5.3 MAC 从哪来
+
+用 **WiFi MAC 末字节 +1**，同一 OUI —— 这是给组合芯片分配蓝牙地址的常规做法：
+
+```
+wlan0:  00:90:4C:11:22:33
+BT:     00:90:4C:11:22:34
+```
+
+`00:90:4C` 是 NVIDIA/Epigram 的 OUI，是这块板子真实的厂商前缀。
+
+### 5.4 顺手把设备类别设对
+
+写完 BD_ADDR 后 Class of Device 会变成 `0x000000`，手机会显示成
+"Miscellaneous"。设成电脑：
+
+```bash
+sudo hcitool cmd 0x03 0x0024 0x0C 0x01 0x00     # 0x00010C = Computer / Laptop
+```
+
+### 5.5 ⚠️ 操作码别搞错（踩过的坑）
+
+```diff
+- hcitool cmd 0x03 0x0013 0x03      # ✗ 这是 Write Local Name！只发 1 字节会把名字写坏
++ hciconfig hci0 piscan             # ✓ 正确开启 inquiry+page scan (0x03 0x001A)
+
+- hcitool cmd 0x03 0x0013 ...       # ✗ 不要手搓名字
++ hciconfig hci0 name "tegra-ubuntu-0"   # ✓ 它会把 248 字节补齐
+```
+
+正确的操作码：
+
+| 命令 | OGF | OCF |
 |---|---|---|
-| `BD Address` | `43:50:C0:00:00:00` | ROM 默认值。可加 `--bd_addr` 写入，但当前不影响扫描/发现 |
-| `.hcd` 固件补丁 | **不需要** | 去掉 `--patchram` 后蓝牙完全正常 |
-| 3 Mbaud 高速模式 | 未启用 | 用 115200 已足够；切速在去掉 LPM 后是否安全未验证 |
-| 原厂 `BCM4350C0.hcd` | 未使用 | L4T 版 64 KB，Android 原厂版 41 KB，两者 md5 不同 |
+| Write Local Name | 0x03 | **0x0013**（248 字节负载） |
+| Write Scan Enable | 0x03 | **0x001A** |
+| Write Class of Device | 0x03 | 0x0024 |
+| Read Local Name | 0x03 | 0x0014 |
+| Write BD_ADDR（厂商） | 0x3f | 0x0001 |
+
+### 5.6 持久化
+
+这个写入存在控制器 RAM 里，**重启就没了**。所以由
+`/usr/local/sbin/bt-mac-setup.sh` 在每次开机时重新写一遍，
+调用点是 `/etc/init/nvwifibt.conf` 的 `post-start`：
+
+```bash
+post-start script
+	/usr/local/sbin/bt-mac-setup.sh
+end script
+```
+
+脚本做的事：
+
+1. 等 `hci0` 出现（`brcm_patchram_plus` 是异步创建的）
+2. 读 `wlan0` 的 MAC，末字节 +1 推导出 BT MAC
+3. `hcitool cmd 0x3f 0x0001 ...` 写入
+4. `hcitool cmd 0x03 0x0024 0x0C 0x01 0x00` 设类别
+5. `hciconfig hci0 name "tegra-ubuntu-0"` 设名字
+6. `hciconfig hci0 piscan` 开启可发现+可连接
+
+### 5.7 最终验证
+
+```
+hci0:	Type: BR/EDR  Bus: UART
+	BD Address: 00:90:4C:11:22:34
+	UP RUNNING PSCAN ISCAN
+	RX bytes:1337  TX bytes:2517  errors:0
+	Features: 0xbf 0xfe 0xcf 0xfe 0xdb 0xff 0x7b 0x87
+	Name: 'tegra-ubuntu-0'
+	Class: 0x00010c
+	Device Class: Computer, Laptop
+	HCI Version: (0x7)  Revision: 0x1000
+```
+
+**实测结果：手机可以搜到 `tegra-ubuntu-0`，显示为笔记本电脑。**
 
 ---
 
-## 六、调试过程中踩过的三个坑（很有参考价值）
+## 六、仍然存在的限制
+
+| 项目 | 状态 | 说明 |
+|---|---|---|
+| `.hcd` 固件补丁 | **不需要，且不可用** | `BCM4350C0.hcd` 与 BCM43341 不兼容，`--patchram` 会让 `brcm_patchram_plus` 永久挂起 |
+| 3 Mbaud 高速模式 | 未启用 | 用 115200 已足够，切速未验证 |
+| 原厂 `BCM4350C0.hcd` | 未使用 | L4T 版 64 KB，Android 原厂版 41 KB，两者 md5 不同，都不兼容 |
+| BD_ADDR | ✅ 已解决 | 开机由 `bt-mac-setup.sh` 自动写入 |
+| 已实测 | ✅ | 手机能搜到 `tegra-ubuntu-0`，Class 显示为 Computer/Laptop |
+
+---
+
+## 七、调试过程中踩过的三个坑（很有参考价值）
 
 ### 坑 1：`fuser` 输出被 `tail` 截掉 → 端口占用没发现
 
@@ -232,52 +374,80 @@ echo PASSWORD | ssh user@dev 'sudo -S cp /tmp/x.conf /etc/init/nvwifibt.conf'
 
 ---
 
-## 七、快速修复脚本
+## 八、快速修复脚本
 
-见 `scripts/08-fix-bluetooth.sh`（幂等，自带备份）。
+见 `scripts/08-fix-bluetooth.sh`（幂等，自带备份）和
+`artifacts/bt-mac-setup.sh`（开机写 BD_ADDR）。
 
 ```bash
-sudo bash scripts/08-fix-bluetooth.sh
+sudo bash scripts/08-fix-bluetooth.sh      # 装 unit 文件 + bt-mac-setup.sh
 sudo reboot
 ```
+
+装完之后每次开机自动：写 BD_ADDR、设 Class、设名字、开启 ISCAN/PSCAN。
 
 ---
 
 ## English Summary
 
-**Problem**: On Xiaomi Mi Pad 1 (Tegra K1, BCM43341) running L4T, every HCI
-command times out (`Can't read local name`, `hci0 command 0x0c03 tx timeout`),
-even though the initial handshake succeeds (`Features` and `RX bytes` are
-populated) and `UP RUNNING PSCAN` is shown without `ISCAN`.
+**Problem 1 — the controller looked dead.** On Xiaomi Mi Pad 1 (Tegra K1,
+BCM43341 over UART) running L4T, every HCI command timed out
+(`Can't read local name`, `hci0 command 0x0c03 tx timeout`), even though the
+initial handshake had succeeded (`Features` and `RX bytes` were populated).
 
-**Root cause**: The stock `/etc/init/nvwifibt.conf` enables low-power mode:
+**Cause**: the stock `/etc/init/nvwifibt.conf` enabled low-power mode:
 
 ```
 echo 1 > /proc/bluetooth/sleep/lpm
 brcm_patchram_plus ... --enable_lpm --tosleep=50000 ...
 ```
 
-The controller goes to sleep after 50 ms of inactivity, and the LPM wake path
-does not work on this board, so it never answers another HCI command.
+The controller sleeps after 50 ms idle and the LPM wake path does not work on
+this board, so it never answers another HCI command.
 
-**Fix**: Remove LPM (`--enable_lpm`, `--tosleep`, and the `sleep/lpm` write),
-drop the 3 Mbaud speed switch, and drop `--patchram` (not needed):
+**Fix**: drop LPM (the `sleep/lpm` write, `--enable_lpm`, `--tosleep`), drop the
+3 Mbaud speed switch, and drop `--patchram`.
 
-```bash
+```
 rfkill unblock bluetooth
 brcm_patchram_plus --enable_hci --scopcm=0,2,0,0,0,0,0,0,0,0 \
                    --baudrate 115200 --no2bytes /dev/ttyTHS2
 ```
 
-Reboot, then verify with `hcitool cmd 0x03 0x0003` (should return
-`HCI Event: 0x0e`), `hciconfig -a` (should show `ISCAN` and `Name`), and
-`hcitool lescan` (should list real nearby devices).
+`--patchram` must NOT be used: `BCM4350C0.hcd` targets a different chip and
+brcm_patchram_plus hangs on it forever (with or without LPM).
 
-**Result**: HCI Reset returns Command Complete, `Name: 'tegra-ubuntu-0'` is
-readable, and BLE scanning discovers 10+ devices with 155 KB of RX traffic
-and zero errors.
+**Problem 2 — still invisible to other devices.** After the fix `hciconfig`
+looked healthy (`UP RUNNING PSCAN ISCAN`) but no phone could find the tablet.
+The controller reports a placeholder address:
 
-**Three debugging pitfalls worth remembering**:
+```
+BD Address: 43:50:C0:00:00:00
+```
+
+Inquiry responses carry that bogus address, and phones drop them. None of the
+usual MAC sources exist on this device: the factory partition (p18) is all
+zeros, the DTB has no `nvidia,bluetooth-mac`, and `/persist` holds no MAC.
+
+**Fix**: write a real address with the Broadcom vendor command, derived from
+the WiFi MAC (same OUI, last octet + 1):
+
+```
+hcitool cmd 0x3f 0x0001 <mac bytes, LSB first>   # Write BD_ADDR (0xFC01)
+hcitool cmd 0x03 0x0024 0x0C 0x01 0x00           # Class of Device = Laptop
+hciconfig hci0 name "tegra-ubuntu-0"
+hciconfig hci0 piscan
+```
+
+The write lives in controller RAM, so `artifacts/bt-mac-setup.sh` re-applies it
+on every boot from the `post-start` hook of the unit file.
+
+**Result**: `Name: 'tegra-ubuntu-0'`, `Class: 0x00010c`, `BD Address:
+00:90:4C:11:22:34`, `HCI Reset` returns Command Complete, `hcitool lescan`
+discovers nearby devices, and **a phone can find and list the tablet as a
+laptop**.
+
+**Four debugging pitfalls worth remembering**:
 
 1. A stale `brcm_patchram_plus` keeps `/dev/ttyTHS2` open — verify the port is
    truly free with `fuser` before every attempt (and don't let `tail` hide the
@@ -286,3 +456,6 @@ and zero errors.
    use `stdbuf -o0` or redirect to a file.
 3. `sudo -S` consumes the first line of a heredoc as the password — upload the
    file separately, then `sudo cp`.
+4. `0x03 0x0013` is **Write Local Name**, not Write Scan Enable (that is
+   `0x03 0x001A`). Sending one byte to it renames the device to `".."`.
+   Use `hciconfig hci0 name/piscan` instead of hand-built commands.

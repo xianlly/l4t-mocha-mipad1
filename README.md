@@ -385,6 +385,7 @@ Deep-dive write-ups:
 | Power button dead after shutdown | `palmas_power_off` soft-off state | see 5.4 (DTB property removal) |
 | `apt` cannot find armhf packages | wrong archive | use `ubuntu-ports` |
 | Bluetooth dead — `Can't read local name`, every HCI command `tx timeout` | low-power mode (`sleep/lpm` + `--enable_lpm`) never wakes | run `scripts/08-fix-bluetooth.sh`, then reboot |
+| Bluetooth works but no device can find the tablet | `BD Address: 43:50:C0:00:00:00` — phones drop inquiry responses from that placeholder | `scripts/08-fix-bluetooth.sh` also writes a real BD_ADDR on every boot |
 
 ---
 

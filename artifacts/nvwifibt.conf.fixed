@@ -4,25 +4,30 @@ description     "NVIDIA bluetooth/wifi init script"
 #
 # WORKING CONFIGURATION (verified on hardware).
 #
-# The stock script enabled low-power mode:
-#     echo 1 > /proc/bluetooth/sleep/lpm
-#     brcm_patchram_plus ... --enable_lpm --tosleep=50000 ...
-# The LPM wake path does not work on this board, so the BCM43341 controller
-# went to sleep and never answered another HCI command.  Every HCI command
-# timed out, including HCI Reset (0x0c03).
+# 1) The stock script enabled low-power mode:
+#        echo 1 > /proc/bluetooth/sleep/lpm
+#        brcm_patchram_plus ... --enable_lpm --tosleep=50000 ...
+#    The LPM wake path does not work on this board, so the BCM43341 went to
+#    sleep and never answered another HCI command again -- every command,
+#    including HCI Reset (0x0c03), timed out.
 #
-# Result of this configuration:
-#   hciconfig -a  ->  UP RUNNING PSCAN ISCAN, Name: 'tegra-ubuntu-0'
-#   hcitool cmd 0x03 0x0003  ->  HCI Event 0x0e (Command Complete)
-#   hcitool lescan  ->  discovers real nearby BLE devices
+# 2) --patchram is NOT usable here: /lib/firmware/BCM4350C0.hcd targets a
+#    different chip and brcm_patchram_plus hangs on it forever.  The patch is
+#    not needed for normal operation.
 #
-# Do NOT re-add --enable_lpm / --tosleep without testing: they are the
-# reason the controller appeared dead.  --patchram is not required for
-# normal operation either.
+# 3) The controller still boots with a placeholder address
+#    43:50:C0:00:00:00, which makes inquiry responses unusable for other
+#    devices (the tablet looks invisible).  bt-mac-setup.sh writes a real
+#    BD_ADDR derived from the WiFi MAC, sets a sane Class of Device and
+#    enables inquiry+page scan.
 #
 instance $SUBTASK
 
 script
 	exec /usr/sbin/rfkill unblock bluetooth
 	exec /usr/sbin/brcm_patchram_plus --enable_hci --scopcm=0,2,0,0,0,0,0,0,0,0 --baudrate 115200 --no2bytes /dev/ttyTHS2
+end script
+
+post-start script
+	/usr/local/sbin/bt-mac-setup.sh
 end script
