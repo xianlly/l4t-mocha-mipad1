@@ -368,6 +368,9 @@ Deep-dive write-ups:
   and the desktop session exiting back to the login page ~30 s after login (16.04)
 * [docs/L4T-BLUETOOTH-FIX.md](docs/L4T-BLUETOOTH-FIX.md) — dead Bluetooth controller
   (`Can't read local name`, `tx timeout` on every HCI command): root cause and fix
+* [docs/L4T-1404-ROOTFS.md](docs/L4T-1404-ROOTFS.md) — **ready-to-flash 14.04 rootfs snapshot**
+  (1.16 GiB, all fixes included): restore procedure, verification, known pitfalls
+* [docs/L4T-1604-ROOTFS.md](docs/L4T-1604-ROOTFS.md) — 16.04 rootfs snapshot (research reference)
 
 ---
 

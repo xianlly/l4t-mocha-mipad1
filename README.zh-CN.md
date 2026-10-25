@@ -367,6 +367,9 @@ ps -ef | grep lightdm        # 桌面在跑
   以及**进桌面 30 秒后又退回登录页**（16.04 专属问题）
 * [docs/L4T-BLUETOOTH-FIX.md](docs/L4T-BLUETOOTH-FIX.md) —— 蓝牙控制器无响应
   （`Can't read local name`、所有 HCI 命令 `tx timeout`）：根因与修复
+* [docs/L4T-1404-ROOTFS.md](docs/L4T-1404-ROOTFS.md) —— **刷入即用的 14.04 rootfs 快照**
+  （1.16 GiB，含全部修复）：恢复步骤、验证清单、常见坑
+* [docs/L4T-1604-ROOTFS.md](docs/L4T-1604-ROOTFS.md) —— 16.04 rootfs 快照（研究参考）
 
 ---
 
