@@ -1,0 +1,15 @@
+--- drivers/media/platform/tegra/Makefile
+7:obj-$(CONFIG_TEGRA_MIPI_CAL)	+= mipical/
+
+--- drivers/media/platform/tegra/mipical/mipi_cal.h (T124 guard)
+31:#if defined(CONFIG_ARCH_TEGRA_21x_SOC) || defined(CONFIG_ARCH_TEGRA_12x_SOC)
+34:extern int tegra_mipi_calibration(int lanes);
+39:int tegra_mipi_calibration(int lanes) {return -ENOSYS; }
+
+--- mipi_cal.c T124 additions
+593:const struct tegra_mipi_data t124_mipi_data = {
+611:	{ .compatible = "nvidia,tegra124-mipical", .data = &t124_mipi_data},
+679:		mipi->mipi_cal_clk = clk_get_sys("mipi-cal", NULL);
+684:		dev_info(&pdev->dev, "using clk_get_sys(\"mipi-cal\")\n");
+689:		mipi->mipi_cal_fixed = clk_get_sys("mipi-cal-fixed", NULL);
+694:		dev_info(&pdev->dev, "using clk_get_sys(\"mipi-cal-fixed\")\n");
