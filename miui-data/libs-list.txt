@@ -1,0 +1,4 @@
+-rw-r--r-- root     root       205948 2026-10-28 15:32 libCameraEffectJNI.so
+-rw-r--r-- root     root       214304 2026-10-28 15:32 libcamera_client.so
+-rw-r--r-- root     root        23564 2026-10-28 15:32 libcamera_metadata.so
+-rw-r--r-- root     root       517468 2026-10-28 15:32 libcameraservice.so

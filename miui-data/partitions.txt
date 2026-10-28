@@ -1,0 +1,33 @@
+major minor  #blocks  name
+
+ 179        0   61071360 mmcblk0
+ 179        1       2048 mmcblk0p1
+ 179        2       2048 mmcblk0p2
+ 179        3       8192 mmcblk0p3
+ 179        4       8192 mmcblk0p4
+ 179        5       4096 mmcblk0p5
+ 179        6       4096 mmcblk0p6
+ 179        7       1024 mmcblk0p7
+ 179        8       2048 mmcblk0p8
+ 179        9       1024 mmcblk0p9
+ 179       10       4096 mmcblk0p10
+ 179       11      26624 mmcblk0p11
+ 179       12       4096 mmcblk0p12
+ 179       13       4096 mmcblk0p13
+ 179       14       4096 mmcblk0p14
+ 179       15      20480 mmcblk0p15
+ 259        0      16384 mmcblk0p16
+ 259        1       8192 mmcblk0p17
+ 259        2       8192 mmcblk0p18
+ 259        3       4096 mmcblk0p19
+ 259        4      28672 mmcblk0p20
+ 259        5      32768 mmcblk0p21
+ 259        6      20480 mmcblk0p22
+ 259        7      20480 mmcblk0p23
+ 259        8      20480 mmcblk0p24
+ 259        9       4096 mmcblk0p25
+ 259       10    1306215 mmcblk0p26
+ 259       11       4504 mmcblk0p27
+ 259       12     393216 mmcblk0p28
+ 259       13   59103232 mmcblk0p29
+ 179       16       4096 mmcblk0rpmb

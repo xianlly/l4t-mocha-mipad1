@@ -1,0 +1,22 @@
+cpufreq_lionheart 5409 0 - Live 0x00000000 (O)
+cpufreq_smartmax 13636 1 - Live 0x00000000 (O)
+sio_iosched 4253 0 - Live 0x00000000
+vr_iosched 4129 0 - Live 0x00000000
+zen_iosched 2814 2 - Live 0x00000000
+symsearch 1116 1 cpufreq_smartmax,[permanent], Live 0x00000000 (O)
+texfat 188704 0 - Live 0x00000000 (PO)
+baseband_usb_chr.ko
+cpufreq_lionheart.ko
+cpufreq_smartmax.ko
+deadline-iosched.ko
+gspca_main.ko
+mac80211.ko
+raw_ip_net.ko
+sio-iosched.ko
+symsearch.ko
+tcrypt.ko
+texfat.ko
+vr-iosched.ko
+zen-iosched.ko
+zram.ko
+zsmalloc.ko
