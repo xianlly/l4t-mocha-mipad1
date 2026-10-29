@@ -1,0 +1,2 @@
+﻿tmp-mksh: syntax error: 'for' unmatched
+

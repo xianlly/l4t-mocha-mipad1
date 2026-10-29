@@ -1,0 +1,4 @@
+﻿tmp-mksh: tail: not found
+
+write: Broken pipe
+

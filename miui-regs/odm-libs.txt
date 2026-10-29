@@ -1,0 +1,4 @@
+﻿tmp-mksh: camera: not found
+
+tmp-mksh: nvmm: not found
+

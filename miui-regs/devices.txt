@@ -1,0 +1,10 @@
+﻿tmp-mksh: pcl: not found
+
+tmp-mksh: ov5693: not found
+
+tmp-mksh: focus: not found
+
+tmp-mksh: mipi: not found
+
+tmp-mksh: imx179: not found
+
