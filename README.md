@@ -374,6 +374,9 @@ Deep-dive write-ups:
 * [docs/L4T-CAMERA-INVESTIGATION.md](docs/L4T-CAMERA-INVESTIGATION.md) — camera: sensors identified
   (IMX179 / OV5693), the `num-channels` DT fix that creates `/dev/video0`, and why capture is
   still blocked (`camera_daemon` is missing and cannot be substituted)
+* [docs/L4T-CAMERA-OV5693-REPRODUCE.md](docs/L4T-CAMERA-OV5693-REPRODUCE.md) — **reproducible
+  OV5693 bring-up guide**: CSI E / 1 lane, T124 MIPI calibration, the real CSI register map,
+  VI channel 1 mapping, RAW10, build/flash/test commands, and the source/DTB/patches
 
 ---
 
