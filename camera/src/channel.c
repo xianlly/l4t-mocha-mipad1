@@ -249,12 +249,14 @@ static int tegra_channel_capture_setup(struct tegra_channel *chan)
 	}
 
 	/* OV5693 on CSI E always outputs RAW10 (0x2b).  Userspace may
-	 * negotiate a RAW8 video format, which makes the VI expect 8-bit
-	 * packets (IMAGE_DT=0x2a, word count=width) and the pixel parser
-	 * report header errors.  Force the CSI input type/word count. */
-	if (chan->port[0] == PORT_E && chan->numlanes == 1) {
+	 * negotiate the 8-bit RGGB format, which cannot hold the sensor's
+	 * 10-bit data; in that case leave the format alone.  For RG10 the
+	 * VI uses TEGRA_IMAGE_FORMAT_T_R16_I, i.e. a 16-bit container, so
+	 * the line word count is width * 2, not width * 10 / 8. */
+	if (chan->port[0] == PORT_E && chan->numlanes == 1 &&
+	    chan->fmtinfo->img_dt == 0x2b) {
 		data_type = 0x2b; /* TEGRA_IMAGE_DT_RAW10 */
-		word_count = (width * 10 + 7) / 8;
+		word_count = width * 2;
 	}
 
 	if (chan->vi->pg_mode ||
