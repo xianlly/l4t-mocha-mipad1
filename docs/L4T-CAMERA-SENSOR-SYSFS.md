@@ -517,3 +517,23 @@ csidump mipi     # 0x700e3000..0x700e4000  MIPI_CAL
 - 校准已过
 - 只剩第三个 CSI block 的复位/上电
 - 如果 camfix35 不行，MIUI 的 CSI dump 能直接给出 ground truth
+
+---
+
+## 十二、突破：真实图像（2026-10-30 晚）
+
+camfix37 + camfix38 之后，OV5693 终于出图：
+
+- **camfix37**：CSI E/F 映射到 **VI channel 1（0x200）**，不再写 VI CSI 4（0x500）
+- **camfix38**：强制 **RAW10（IMAGE_DT=0x2b）**，word count = `width * 10 / 8`
+- 1280x720 JPEG 从 30 KB 全黑变成 **526 / 546 KB**，测试图与正常图 MD5 不同
+- 正常图能看到白色物体和圆形物体；仍有 Bayer 假色和右侧黑边
+- 原始 RG10 1,843,200 字节，10-bit 数据有效；PC 端 debayer 能看到场景
+
+剩余是图像质量问题：
+
+- v4l2 只暴露 Bayer（RGGB/RG10/RG12），没有 RGB/YUV；需要 debayer 或 ISP
+- v4l2 的 RG10 buffer 是 2 bytes/pixel，而 VI 每行只写 1600 字节（RAW10 打包），右侧有 960 字节黑边
+- syncpt timeout 日志仍在，但帧已经进来，属于首帧/同步点问题
+
+样本与 debayer 脚本：`release/camera-samples/`。

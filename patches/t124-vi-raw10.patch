@@ -1,0 +1,75 @@
+camera: route CSI E to VI channel 1 and force RAW10
+
+MIUI's front-camera dump shows the OV5693 on CSI E being received
+by VI CSI 1 (0x200), not VI CSI 4 (0x500).  The v4l2 driver also
+negotiated the 8-bit RGGB format, so the VI expected IMAGE_DT=0x2a
+and a word count of width while the sensor sends RAW10 (0x2b).
+Map ports E/F to VI channel 1 and force the RAW10 data type and
+width*10/8 word count for the 1-lane OV5693.
+
+--- a/drivers/media/platform/tegra/camera/channel.c
++++ b/drivers/media/platform/tegra/camera/channel.c
+@@ -46,6 +46,11 @@
+ #define FRAMERATE	30
+ #define BPP_MEM		2
+ 
++/* On T124 the CSI E/F receiver feeds the second VI channel (the one
++ * normally used by CSI B).  Keep chan->port = 4/5 for the CIL/PHY, but
++ * program the VI CSI block and syncpoint conditions as VI channel 1. */
++#define TEGRA_CSI_TO_VI_PORT(p)	(((p) >= 4) ? 1 : (p))
++
+ extern int _vb2_fop_release(struct file *file, struct mutex *lock);
+ static void tegra_channel_queued_buf_done(struct tegra_channel *chan,
+ 					  enum vb2_buffer_state state);
+@@ -243,6 +248,15 @@
+ 		word_count = tegra_core_get_word_count(width, chan->fmtinfo);
+ 	}
+ 
++	/* OV5693 on CSI E always outputs RAW10 (0x2b).  Userspace may
++	 * negotiate a RAW8 video format, which makes the VI expect 8-bit
++	 * packets (IMAGE_DT=0x2a, word count=width) and the pixel parser
++	 * report header errors.  Force the CSI input type/word count. */
++	if (chan->port[0] == PORT_E && chan->numlanes == 1) {
++		data_type = 0x2b; /* TEGRA_IMAGE_DT_RAW10 */
++		word_count = (width * 10 + 7) / 8;
++	}
++
+ 	if (chan->vi->pg_mode ||
+ 	   (chan->fmtinfo->vf_code == TEGRA_VF_YUV422) ||
+ 	   (chan->fmtinfo->vf_code == TEGRA_VF_RGB888))
+@@ -472,7 +486,7 @@
+ 
+ 	/* clear VI errors */
+ 	for (index = 0; index < valid_ports; index++) {
+-		frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
++		frame_start = VI_CSI_PP_FRAME_START(TEGRA_CSI_TO_VI_PORT(chan->port[index]));
+ 		if (error_val & frame_start)
+ 			chan->syncpoint_fifo[index] = SYNCPT_FIFO_DEPTH;
+ 	}
+@@ -528,7 +542,7 @@
+ 					chan->syncpt[index], 1);
+ 		/* Do not arm sync points if FIFO had entries before */
+ 		if (!chan->syncpoint_fifo[index]) {
+-			frame_start = VI_CSI_PP_FRAME_START(chan->port[index]);
++			frame_start = VI_CSI_PP_FRAME_START(TEGRA_CSI_TO_VI_PORT(chan->port[index]));
+ 			val = VI_CFG_VI_INCR_SYNCPT_COND(frame_start) |
+ 				chan->syncpt[index];
+ 			tegra_channel_write(chan,
+@@ -640,7 +654,7 @@
+ 		/* Program syncpoints */
+ 		thresh[index] = nvhost_syncpt_incr_max_ext(chan->vi->ndev,
+ 					chan->syncpt[index], 1);
+-		mw_ack_done = VI_CSI_MW_ACK_DONE(chan->port[index]);
++		mw_ack_done = VI_CSI_MW_ACK_DONE(TEGRA_CSI_TO_VI_PORT(chan->port[index]));
+ 		val = VI_CFG_VI_INCR_SYNCPT_COND(mw_ack_done) |
+ 				chan->syncpt[index];
+ 		tegra_channel_write(chan,
+@@ -1917,7 +1931,7 @@
+ 		numlanes = numlanes > 4 ? 4 : numlanes;
+ 		/* maximum of 4 lanes are present per CSI block */
+ 		chan->csibase[idx] = vi->iomem +
+-					TEGRA_VI_CSI_BASE(chan->port[idx]);
++					TEGRA_VI_CSI_BASE(TEGRA_CSI_TO_VI_PORT(chan->port[idx]));
+ 		set_csi_portinfo(vi->csi, chan->port[idx], numlanes);
+ 	}
+ 	/* based on gang mode valid ports will be updated - set default to 1 */
