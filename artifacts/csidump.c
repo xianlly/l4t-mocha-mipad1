@@ -59,6 +59,9 @@ int main(int argc, char **argv)
 	if (argc > 1 && !strcmp(argv[1], "mipi"))
 		return dump(0x700e3000UL, 0x1000UL);
 
+	if (argc > 1 && !strcmp(argv[1], "vi1"))
+		return dump(0x54084000UL, 0x2000UL);
+
 	if (argc > 2) {
 		unsigned long base = strtoul(argv[1], NULL, 0);
 		unsigned long len = strtoul(argv[2], NULL, 0);
@@ -69,5 +72,8 @@ int main(int argc, char **argv)
 		return dump(base, len);
 	}
 
-	return dump(0x54080000UL, 0x20000UL);
+	/* 8 KiB covers VI + CSI A/B (0x838/0x92c), C/D (0x1038/0x112c)
+	 * and E/F (0x1838/0x192c).  Reading the whole 0x40000 aperture
+	 * can hit unpopulated holes and hang the bus. */
+	return dump(0x54080000UL, 0x2000UL);
 }
