@@ -1,0 +1,137 @@
+camera: use the T124 CSI register map, not the T210 one
+
+R24.1's camera/registers.h is the T210 layout: CIL E lives at
+PIXEL_PARSER_4_BASE(0x1838)+0xf4 = 0x192c and PHY_CIL_COMMAND is
+assumed to be at block+0xd0.  On T124 the CIL blocks are at
+0x92c/0x960/0x994/0x9c8/0xa08 and the command/clock/reset registers
+are global (0x908/0xaf4/0xaf0).  CSIA only worked by accident
+(0x838+0xd0 == 0x908).  Port CSI E is the front OV5693 and needs
+the MIUI value 0x12020202 for a single lane.
+
+Reference: MIUI soc_camera/tegra_camera/vi2.c
+
+--- a/drivers/media/platform/tegra/csi/csi.c
++++ b/drivers/media/platform/tegra/csi/csi.c
+@@ -29,6 +29,25 @@
+ 
+ #define DEBUG 1
+ 
++/*
++ * T124 CSI register map, from MIUI's soc_camera/tegra_camera/vi2.c.
++ *
++ * The R24.1 camera/registers.h we inherited is the T210 layout: it assumes
++ * a per-block PHY_CIL_COMMAND at block+0xd0 and puts CIL E at
++ * PIXEL_PARSER_4_BASE(0x1838)+0xf4 = 0x192c.  On T124 the CIL blocks are at
++ * 0x92c/0x960/0x994/0x9c8/0xa08 and the command/clock registers are global.
++ * That is why CSIA happened to work (0x838+0xd0 = 0x908 by accident) and
++ * CIL E always read zero.
++ */
++#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
++#undef TEGRA_CSI_PHY_CIL_COMMAND
++#define TEGRA_CSI_PHY_CIL_COMMAND	0x908
++#undef TEGRA_CSI_CLKEN_OVERRIDE
++#define TEGRA_CSI_CLKEN_OVERRIDE		0xaf4
++#undef TEGRA_CSI_CSI_SW_STATUS_RESET
++#define TEGRA_CSI_CSI_SW_STATUS_RESET	0xaf0
++#endif
++
+ static void csi_write(struct tegra_csi_device *csi, unsigned int addr,
+ 		u32 val, u8 port)
+ {
+@@ -166,6 +185,31 @@
+ static void set_csi_registers(struct tegra_csi_device *csi,
+ 		void __iomem *regbase)
+ {
++#if defined(CONFIG_ARCH_TEGRA_12x_SOC)
++	static const u32 pp_base[6] = {
++		0x838, 0x86c,	/* A, B */
++		0x838, 0x86c,	/* C, D */
++		0x86c, 0x86c,	/* E, F use the B pixel parser */
++	};
++	static const u32 cil_base[6] = {
++		0x92c, 0x960, 0x994, 0x9c8, 0xa08, 0xa3c,
++	};
++	int i;
++
++	/* PHY_CIL_COMMAND / CLKEN_OVERRIDE / SW_STATUS_RESET are global
++	 * registers.  Keep every iomem[] entry at the base so the existing
++	 * csi_write(csi, ..., port_num >> 1) calls land on 0x908/0xaf4/0xaf0
++	 * for every port. */
++	csi->iomem[0] = csi->iomem[1] = csi->iomem[2] = regbase;
++
++	for (i = 0; i < 6; i++) {
++		csi->ports[i].pixel_parser = regbase + pp_base[i];
++		csi->ports[i].cil = regbase + cil_base[i];
++		csi->ports[i].tpg = regbase + 0xa68 + (i & 1) * 0x34;
++		csi->ports[i].num = i;
++		csi->ports[i].lanes = 2;
++	}
++#else
+ 	int i, j, idx;
+ 
+ 	csi->iomem[0] = (regbase + TEGRA_CSI_PIXEL_PARSER_0_BASE);
+@@ -189,6 +233,7 @@
+ 			csi->ports[idx].lanes = 2;
+ 		}
+ 	}
++#endif
+ }
+ 
+ static int clock_start(struct tegra_csi_device *csi,
+@@ -330,15 +375,6 @@
+ {
+ 	struct tegra_csi_port *port = &csi->ports[port_num];
+ 
+-	/* The third CSI block (E/F) is left in reset by the bootloader on
+-	 * this board: every CIL/PHY write reads back zero.  Pulse the CIL
+-	 * and CSI resets before programming the block. */
+-	cil_write(port, TEGRA_CSI_CIL_SW_SENSOR_RESET, 0x1);
+-	csi_write(csi, TEGRA_CSI_CSI_SW_STATUS_RESET, 0x1, port_num >> 1);
+-	usleep_range(10, 20);
+-	cil_write(port, TEGRA_CSI_CIL_SW_SENSOR_RESET, 0x0);
+-	csi_write(csi, TEGRA_CSI_CSI_SW_STATUS_RESET, 0x0, port_num >> 1);
+-
+ 	csi_write(csi, TEGRA_CSI_CLKEN_OVERRIDE, 0, port_num>>1);
+ 
+ 	/* Clean up status */
+@@ -350,11 +386,10 @@
+ 
+ 	/* CIL PHY registers setup */
+ 	cil_write(port, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
+-	/* CIL_PHY_CONTROL = CILx_CONTROL0.  Bit 6 is BYPASS_LP_SEQ: the
+-	 * sensor is already streaming when the CIL is enabled, so it has
+-	 * missed LP11->LP01->LP00 and reports control errors on the clock
+-	 * and data lanes.  Bypass the LP sequence and look for LP00. */
+-	cil_write(port, TEGRA_CSI_CIL_PHY_CONTROL, 0x4A);
++	/* CILx_CONTROL0: THS_SETTLE = 0xA, matching MIUI's vi2.c common set.
++	 * The old 0x4A BYPASS_LP_SEQ hack was compensating for reading and
++	 * writing the wrong CIL E address, so it is not needed now. */
++	cil_write(port, TEGRA_CSI_CIL_PHY_CONTROL, 0x0A);
+ 
+ 	/*
+ 	 * The CSI unit provides for connection of up to six cameras in
+@@ -373,8 +408,8 @@
+ 			  BRICK_CLOCK_A_4X);
+ 		cil_write(port_b, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
+ 		cil_write(port_b, TEGRA_CSI_CIL_INTERRUPT_MASK, 0x0);
+-		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0x4A);
+-		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0x4A);
++		cil_write(port_a, TEGRA_CSI_CIL_PHY_CONTROL, 0x0A);
++		cil_write(port_b, TEGRA_CSI_CIL_PHY_CONTROL, 0x0A);
+ 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND,
+ 			CSI_A_PHY_CIL_ENABLE | CSI_B_PHY_CIL_ENABLE,
+ 			port_num>>1);
+@@ -384,8 +419,11 @@
+ 		struct tegra_csi_port *port_a = &csi->ports[port_val];
+ 
+ 		cil_write(port_a, TEGRA_CSI_CIL_PAD_CONFIG0, 0x0);
+-		val |= ((port->num & 0x1) == PORT_A) ? CSI_A_PHY_CIL_ENABLE :
+-			CSI_B_PHY_CIL_ENABLE;
++		if (port_num == PORT_E && port->lanes == 1)
++			val = 0x12020202;	/* MIUI vi2.c: CSI E, 1 lane */
++		else
++			val |= ((port->num & 0x1) == PORT_A) ?
++				CSI_A_PHY_CIL_ENABLE : CSI_B_PHY_CIL_ENABLE;
+ 		csi_write(csi, TEGRA_CSI_PHY_CIL_COMMAND, val, port_num>>1);
+ 	}
+ 
