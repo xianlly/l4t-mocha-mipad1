@@ -45,3 +45,20 @@ Next options:
 - `artifacts/kernel-camfix41-uImage`
 - `camera-samples/raw-force41.bin` — covered-lens frame from camfix41
 - `camera-samples/black-camfix41.png` — contrast-stretched view of it
+
+## Software ISP attempt (option A)
+
+- `camera/isp/software_isp.py` — packed/16-bit detection, black level,
+  bilinear RGGB demosaic, gray-world AWB, 3x3 median denoise, gamma.
+- `camera/isp/flat_correct.py` — per-column gain from a covered-lens frame.
+
+Result: AWB and denoise improve the colour slightly, but the 160-column
+vertical stripe pattern remains.  Flat-field correction with the covered
+frame makes it worse because the scene and flat frames came from different
+kernel/format configurations.
+
+Conclusion: the stripes are in the raw data (CSI/VI packing or syncpoint),
+not in the ISP.  `kernel-camfix43-uImage` (packed RAW10 stride: word count
+1600, bytesperline 1600, bypass transform) was built but could not be
+deployed because the 7.7 MB SSH transfer kept stalling.  It is the next
+targeted test.
