@@ -422,3 +422,98 @@ both data lanes report control errors. The official board file releases
 the front camera is on **CSI E**, not CSI A. `camfix32` adds the missing PORT_E/F
 calibration mapping; it is built but still needs a real-device test with the
 cam21 DTB and `/dev/video4`.
+
+---
+
+## 十一、原理图确认：CSIE + 单 lane（2026-10-30 晚）
+
+用户提供了 `xiaomi_mi_pad1_schematic.pdf`（27 页），第 18 页是 SoC 的
+CAM CSI/DSI 引脚，第 25 页是前后摄像头座子。结论是决定性的：
+
+### 11.1 前置 OV5693 = CSI E，只有 1 条 data lane
+
+```
+第 18 页：
+  CSI_E_CLK  -> MIPI_CSI1_CLK_P/M
+  CSI_E_D0   -> MIPI_CSI1_LANE0_P/M      <-- 只有 lane0
+
+第 25 页 J1502（FRONT CAMERA）：
+  MIPI_CSI1_CLK_P/M
+  MIPI_CSI1_LANE0_P/M
+  CAM2_MCLK / CAM2_PWDN / CAM2_RST_N / CAM_I2C
+```
+
+后置 IMX179 才是：
+
+```
+CSI_A/B -> MIPI_CSI0_LANE0..3           (4 lane)
+```
+
+所以之前的 DTB 错了两个地方：
+
+| 项目 | 之前 | 正确 |
+|---|---|---|
+| csi-port | 0（CSIA） | **4（CSIE）** |
+| bus-width / num-lanes | 2 | **1** |
+| data-lanes | `<1 2>` | **`<1>`** |
+
+### 11.2 按原理图改完后的实测
+
+DTB `dtb-port4-1lane.dtb`（sha `d2004ae0…`）+ camfix34：
+
+```
+ENABLE_STREAM enter: ... port0=4 numlanes=1
+MIPI_CAL(T124): port0=4 numlanes=1 ...
+mipi_dbg: cal done in 6 ms, val=0x17a60
+```
+
+**端口和 lane 数都对了，校准也过了。** 但是：
+
+```
+TEGRA_CSI_CIL_STATUS       0x00000000
+TEGRA_CSI_CILX_STATUS      0x00000000
+TEGRA_CSI_CIL_PHY_CONTROL  0x00000000
+TEGRA_CSI_PHY_CIL_COMMAND  0x00000000
+```
+
+CSIE 的 CIL/PHY 寄存器仍然全 0。开流时 `cile` 时钟是 `refcnt=1, state=1`，
+所以不是时钟没开，而是**第三个 CSI block（E/F）没有真正复位/上电**。
+
+### 11.3 camfix35：给第三个 block 打复位脉冲
+
+在 `tegra_csi_start_streaming()` 里，配置 CIL 之前先：
+
+```c
+cil_write(port, TEGRA_CSI_CIL_SW_SENSOR_RESET, 0x1);
+csi_write(csi, TEGRA_CSI_CSI_SW_STATUS_RESET, 0x1, port_num >> 1);
+usleep_range(10, 20);
+cil_write(port, TEGRA_CSI_CIL_SW_SENSOR_RESET, 0x0);
+csi_write(csi, TEGRA_CSI_CSI_SW_STATUS_RESET, 0x0, port_num >> 1);
+```
+
+camfix35 sha `decf4382…`，已编译，设备离线未测。
+
+### 11.4 MIUI CSI/VI dump 工具
+
+`release/artifacts/csidump`（静态 ARM，sha `90e914d0…`）：
+
+```bash
+csidump          # 0x54080000..0x540a0000  VI + CSI A/B/C/D/E/F
+csidump mipi     # 0x700e3000..0x700e4000  MIPI_CAL
+```
+
+在 MIUI 前置相机预览时抓 `csi-front.txt` / `mipi-front.txt`，可以确认：
+
+- MIUI 实际用哪个 CSI block
+- CIL 的 THS_SETTLE / BYPASS_LP_SEQ
+- `PHY_CIL_COMMAND` 是否使能
+- 第三个 block 在 MIUI 下是否有值
+
+### 11.5 成功率
+
+有了原理图，成功率从 30–40% 上调到 **50–60%**：
+
+- 端口/lane 已确定并改对
+- 校准已过
+- 只剩第三个 CSI block 的复位/上电
+- 如果 camfix35 不行，MIUI 的 CSI dump 能直接给出 ground truth
