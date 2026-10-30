@@ -605,12 +605,17 @@ static int ov5693_set_frame_length(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time(struct ov5693 *priv, s32 val);
 static int ov5693_set_coarse_time_short(struct ov5693 *priv, s32 val);
 
+static int force_mode = -1;
+module_param(force_mode, int, 0644);
+MODULE_PARM_DESC(force_mode, "Force OV5693 mode table index (-1 = auto)");
+
 static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct camera_common_data *s_data = to_camera_common_data(client);
 	struct ov5693 *priv = (struct ov5693 *)s_data->priv;
 	struct v4l2_control control;
+	int mode;
 	int err;
 
 	dev_info(&client->dev, "ov5693_s_stream(enable=%d)\n", enable);
@@ -626,7 +631,12 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 			mode_table[OV5693_MODE_STOP_STREAM]);
 	}
 
-	err = ov5693_write_table(priv, mode_table[s_data->mode]);
+	mode = (force_mode >= 0 && force_mode < ARRAY_SIZE(mode_table)) ?
+		force_mode : s_data->mode;
+	dev_info(&client->dev, "ov5693 mode %d (s_data->mode %d)\n",
+		 mode, s_data->mode);
+
+	err = ov5693_write_table(priv, mode_table[mode]);
 	if (err)
 		goto exit;
 

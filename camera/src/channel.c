@@ -257,6 +257,9 @@ static int tegra_channel_capture_setup(struct tegra_channel *chan)
 	    chan->fmtinfo->img_dt == 0x2b) {
 		data_type = 0x2b; /* TEGRA_IMAGE_DT_RAW10 */
 		word_count = width * 2;
+		/* Let the VI pixel transform expand packed RAW10 into the
+		 * R16_I container instead of bypassing it. */
+		bypass_pixel_transform = 0;
 	}
 
 	if (chan->vi->pg_mode ||
