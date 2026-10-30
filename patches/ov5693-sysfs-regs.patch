@@ -1,0 +1,448 @@
+ov5693: add register/status sysfs interface
+
+Expose the OV5693 registers needed to tell whether the sensor is
+actually streaming: generic 16-bit reg access, named register dump,
+exposure/gain/frame-length decode, 0x0100 stream state and a
+one-shot status verdict.
+
+--- a/drivers/media/i2c/ov5693.c
++++ b/drivers/media/i2c/ov5693.c
+@@ -58,6 +58,7 @@
+ #define OV5693_DEFAULT_HEIGHT	1944
+ #define OV5693_DEFAULT_DATAFMT	V4L2_MBUS_FMT_SRGGB10_1X10
+ #define OV5693_DEFAULT_CLK_FREQ	24000000
++#define OV5693_CHIP_ID		0x5690	/* 0x300a/0x300b */
+ 
+ struct ov5693 {
+ 	struct camera_common_power_rail	power;
+@@ -76,6 +77,11 @@
+ 	struct regmap			*regmap;
+ 	struct camera_common_data	*s_data;
+ 	struct camera_common_pdata	*pdata;
++
++	/* debug sysfs state */
++	u16				reg_addr;
++	bool				is_streaming;
++
+ 	struct v4l2_ctrl		*ctrls[];
+ };
+ 
+@@ -611,6 +617,8 @@
+ 
+ 	dev_dbg(&client->dev, "%s++\n", __func__);
+ 
++	priv->is_streaming = false;
++
+ 	if (!enable) {
+ 		ov5693_update_ctrl_range(priv, OV5693_MAX_FRAME_LENGTH);
+ 
+@@ -663,6 +671,8 @@
+ 	if (err)
+ 		goto exit;
+ 
++	priv->is_streaming = true;
++
+ 	if (test_mode)
+ 		err = ov5693_write_table(priv,
+ 			mode_table[OV5693_MODE_TEST_PATTERN]);
+@@ -1447,6 +1457,368 @@
+ 	.link_validate = v4l2_subdev_link_validate,
+ };
+ 
++/* -------------------------------------------------------------------------
++ * Debug sysfs interface
++ *
++ * The sensor is only reachable over I2C, so expose the registers that tell
++ * us whether it is actually streaming:
++ *
++ *   reg          generic 16-bit register window (write addr [value])
++ *   regs         named dump of the bring-up registers
++ *   exposure     exposure in lines      (0x3500/0x3501/0x3502)
++ *   gain         gain multiplier        (0x350a/0x350b)
++ *   frame_length vertical frame length  (0x380e/0x380f)
++ *   streaming    driver state and sensor 0x0100
++ *   status       one-shot summary and verdict
++ *
++ * Usage:
++ *   echo 3501 > /sys/bus/i2c/devices/2-0036/reg
++ *   cat /sys/bus/i2c/devices/2-0036/reg       -> 0x3501 0x7b
++ *   echo "350a 10" > /sys/bus/i2c/devices/2-0036/reg
++ *   cat /sys/bus/i2c/devices/2-0036/status
++ * ------------------------------------------------------------------------- */
++
++struct ov5693_dbg_state {
++	u8	stream;
++	u16	chip_id;
++	u8	exp_h, exp_m, exp_l;
++	u8	gain_h, gain_l;
++	u8	fl_h, fl_l;
++};
++
++static struct ov5693 *ov5693_from_dev(struct device *dev)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct camera_common_data *s_data = to_camera_common_data(client);
++
++	return (struct ov5693 *)s_data->priv;
++}
++
++static int ov5693_dbg_read(struct ov5693 *priv, u16 addr, u8 *val)
++{
++	unsigned int v;
++	int err;
++
++	err = regmap_read(priv->regmap, addr, &v);
++	if (err)
++		return err;
++
++	*val = v & 0xff;
++	return 0;
++}
++
++static int ov5693_dbg_snapshot(struct ov5693 *priv,
++			       struct ov5693_dbg_state *st)
++{
++	u8 chip_l;
++	int err;
++
++	err = ov5693_dbg_read(priv, 0x0100, &st->stream);
++	if (err)
++		return err;
++
++	err = ov5693_dbg_read(priv, 0x300a, &chip_l);
++	if (err)
++		return err;
++	st->chip_id = chip_l << 8;
++
++	err = ov5693_dbg_read(priv, 0x300b, &chip_l);
++	if (err)
++		return err;
++	st->chip_id |= chip_l;
++
++	err = ov5693_dbg_read(priv, 0x3500, &st->exp_h);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x3501, &st->exp_m);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x3502, &st->exp_l);
++	if (err)
++		return err;
++
++	err = ov5693_dbg_read(priv, 0x350a, &st->gain_h);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x350b, &st->gain_l);
++	if (err)
++		return err;
++
++	err = ov5693_dbg_read(priv, 0x380e, &st->fl_h);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x380f, &st->fl_l);
++	if (err)
++		return err;
++
++	return 0;
++}
++
++static ssize_t ov5693_reg_show(struct device *dev,
++			       struct device_attribute *attr, char *buf)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	u8 val;
++	int err;
++
++	err = ov5693_dbg_read(priv, priv->reg_addr, &val);
++	if (err)
++		return err;
++
++	return sprintf(buf, "0x%04x 0x%02x\n", priv->reg_addr, val);
++}
++
++static ssize_t ov5693_reg_store(struct device *dev,
++				struct device_attribute *attr,
++				const char *buf, size_t count)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	unsigned int addr, val;
++	int n, err;
++
++	n = sscanf(buf, "%x %x", &addr, &val);
++	if (n < 1)
++		return -EINVAL;
++	if (addr > 0xffff || (n == 2 && val > 0xff))
++		return -EINVAL;
++
++	priv->reg_addr = addr;
++	if (n == 2) {
++		err = regmap_write(priv->regmap, addr, val);
++		if (err)
++			return err;
++	}
++
++	return count;
++}
++
++struct ov5693_dbg_reg {
++	u16		addr;
++	const char	*name;
++};
++
++static const struct ov5693_dbg_reg ov5693_dbg_regs[] = {
++	{ 0x0100, "stream" },
++	{ 0x0103, "sw_reset" },
++	{ 0x3008, "sys_ctrl0" },
++	{ 0x300a, "chip_id_h" },
++	{ 0x300b, "chip_id_l" },
++	{ 0x3010, "pll1_ctrl" },
++	{ 0x3011, "pll1_mult" },
++	{ 0x3012, "pll1_sel" },
++	{ 0x3013, "pll1_div" },
++	{ 0x3014, "pll1_div2" },
++	{ 0x3015, "pll1_div3" },
++	{ 0x3500, "exp_h" },
++	{ 0x3501, "exp_m" },
++	{ 0x3502, "exp_l" },
++	{ 0x3503, "aec_ctrl" },
++	{ 0x350a, "gain_h" },
++	{ 0x350b, "gain_l" },
++	{ 0x380e, "frame_len_h" },
++	{ 0x380f, "frame_len_l" },
++	{ 0x4800, "mipi_ctrl" },
++	{ 0x4801, "mipi_ctrl01" },
++	{ 0x4837, "mipi_timing" },
++};
++
++static ssize_t ov5693_regs_show(struct device *dev,
++				struct device_attribute *attr, char *buf)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	unsigned int i;
++	int len = 0;
++
++	for (i = 0; i < ARRAY_SIZE(ov5693_dbg_regs); i++) {
++		u8 val;
++		int err;
++
++		err = ov5693_dbg_read(priv, ov5693_dbg_regs[i].addr, &val);
++		if (err)
++			len += sprintf(buf + len,
++				"0x%04x %-12s <read error %d>\n",
++				ov5693_dbg_regs[i].addr,
++				ov5693_dbg_regs[i].name, err);
++		else
++			len += sprintf(buf + len, "0x%04x %-12s 0x%02x\n",
++				ov5693_dbg_regs[i].addr,
++				ov5693_dbg_regs[i].name, val);
++	}
++
++	return len;
++}
++
++static ssize_t ov5693_exposure_show(struct device *dev,
++				    struct device_attribute *attr, char *buf)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	u8 h, m, l;
++	u32 raw;
++	int err;
++
++	err = ov5693_dbg_read(priv, 0x3500, &h);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x3501, &m);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x3502, &l);
++	if (err)
++		return err;
++
++	raw = ((h & 0x0f) << 16) | (m << 8) | l;
++
++	return sprintf(buf, "0x%05x %u.%02u lines "
++		     "(0x3500=0x%02x 0x3501=0x%02x 0x3502=0x%02x)\n",
++		     raw, raw >> 4, (raw & 0xf) * 100 / 16, h, m, l);
++}
++
++static ssize_t ov5693_gain_show(struct device *dev,
++				struct device_attribute *attr, char *buf)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	u8 h, l;
++	u16 raw;
++	int err;
++
++	err = ov5693_dbg_read(priv, 0x350a, &h);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x350b, &l);
++	if (err)
++		return err;
++
++	raw = (h << 8) | l;
++
++	return sprintf(buf, "0x%04x %u.%02ux "
++		     "(0x350a=0x%02x 0x350b=0x%02x)\n",
++		     raw, raw / 16, (raw % 16) * 100 / 16, h, l);
++}
++
++static ssize_t ov5693_frame_length_show(struct device *dev,
++					struct device_attribute *attr,
++					char *buf)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	u8 h, l;
++	u16 fl;
++	int err;
++
++	err = ov5693_dbg_read(priv, 0x380e, &h);
++	if (err)
++		return err;
++	err = ov5693_dbg_read(priv, 0x380f, &l);
++	if (err)
++		return err;
++
++	fl = (h << 8) | l;
++
++	return sprintf(buf, "0x%04x %u lines\n", fl, fl);
++}
++
++static ssize_t ov5693_streaming_show(struct device *dev,
++				     struct device_attribute *attr, char *buf)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	u8 val;
++	int err;
++
++	err = ov5693_dbg_read(priv, 0x0100, &val);
++	if (err)
++		return sprintf(buf, "driver=%d sensor=<read error %d>\n",
++			       priv->is_streaming ? 1 : 0, err);
++
++	return sprintf(buf, "driver=%d sensor=0x%02x (%s)\n",
++		       priv->is_streaming ? 1 : 0, val,
++		       (val & 1) ? "streaming" : "standby");
++}
++
++static ssize_t ov5693_status_show(struct device *dev,
++				  struct device_attribute *attr, char *buf)
++{
++	struct ov5693 *priv = ov5693_from_dev(dev);
++	struct camera_common_power_rail *pw = &priv->power;
++	struct ov5693_dbg_state st;
++	u32 exp_raw;
++	u16 gain_raw, frame_len;
++	const char *verdict;
++	int err, len = 0;
++
++	err = ov5693_dbg_snapshot(priv, &st);
++	if (err) {
++		len += sprintf(buf + len,
++			"ov5693 %s  power=%s\n",
++			dev_name(dev), pw->state == SWITCH_ON ? "on" : "off");
++		len += sprintf(buf + len,
++			"I2C read failed (%d)\n", err);
++		if (!priv->is_streaming)
++			len += sprintf(buf + len,
++				"verdict: IDLE - sensor is powered down or in standby; "
++				"start a stream and read again\n");
++		else
++			len += sprintf(buf + len,
++				"verdict: NOT RESPONDING - streaming was requested "
++				"but I2C reads fail\n");
++		return len;
++	}
++
++	exp_raw = ((st.exp_h & 0x0f) << 16) | (st.exp_m << 8) | st.exp_l;
++	gain_raw = (st.gain_h << 8) | st.gain_l;
++	frame_len = (st.fl_h << 8) | st.fl_l;
++
++	len += sprintf(buf + len,
++		"ov5693 %s  power=%s  driver_stream=%d\n",
++		dev_name(dev), pw->state == SWITCH_ON ? "on" : "off",
++		priv->is_streaming ? 1 : 0);
++	len += sprintf(buf + len, "  chip id    : 0x%04x %s\n", st.chip_id,
++		(st.chip_id == OV5693_CHIP_ID || st.chip_id == 0x5693)
++			? "(OV5693)" : "(unexpected)");
++	len += sprintf(buf + len, "  0x0100     : 0x%02x (%s)\n", st.stream,
++		(st.stream & 1) ? "streaming" : "standby");
++	len += sprintf(buf + len, "  exposure   : 0x%05x = %u.%02u lines\n",
++		exp_raw, exp_raw >> 4, (exp_raw & 0xf) * 100 / 16);
++	len += sprintf(buf + len, "  gain       : 0x%04x = %u.%02ux\n",
++		gain_raw, gain_raw / 16, (gain_raw % 16) * 100 / 16);
++	len += sprintf(buf + len, "  frame len  : 0x%04x = %u lines\n",
++		frame_len, frame_len);
++
++	if (st.chip_id != OV5693_CHIP_ID && st.chip_id != 0x5693)
++		verdict = "UNKNOWN - chip id mismatch";
++	else if (!(st.stream & 1))
++		verdict = "NOT OUTPUTTING - 0x0100=0, sensor is in standby";
++	else if (!priv->is_streaming)
++		verdict = "SUSPECT - 0x0100=1 but s_stream(1) never completed";
++	else
++		verdict = "STREAMING - sensor is in output mode; "
++			  "verify MIPI activity on the CSI side";
++
++	len += sprintf(buf + len, "verdict: %s\n", verdict);
++	return len;
++}
++
++static DEVICE_ATTR(reg, 0644, ov5693_reg_show, ov5693_reg_store);
++static DEVICE_ATTR(regs, 0444, ov5693_regs_show, NULL);
++static DEVICE_ATTR(exposure, 0444, ov5693_exposure_show, NULL);
++static DEVICE_ATTR(gain, 0444, ov5693_gain_show, NULL);
++static DEVICE_ATTR(frame_length, 0444, ov5693_frame_length_show, NULL);
++static DEVICE_ATTR(streaming, 0444, ov5693_streaming_show, NULL);
++static DEVICE_ATTR(status, 0444, ov5693_status_show, NULL);
++
++static struct attribute *ov5693_dbg_attrs[] = {
++	&dev_attr_reg.attr,
++	&dev_attr_regs.attr,
++	&dev_attr_exposure.attr,
++	&dev_attr_gain.attr,
++	&dev_attr_frame_length.attr,
++	&dev_attr_streaming.attr,
++	&dev_attr_status.attr,
++	NULL,
++};
++
++static const struct attribute_group ov5693_dbg_attr_group = {
++	.attrs = ov5693_dbg_attrs,
++};
++
+ static int ov5693_probe(struct i2c_client *client,
+ 			const struct i2c_device_id *id)
+ {
+@@ -1505,6 +1877,7 @@
+ 	common_data->def_clk_freq	= OV5693_DEFAULT_CLK_FREQ;
+ 
+ 	priv->i2c_client = client;
++	priv->reg_addr = 0x300a;
+ 	priv->s_data			= common_data;
+ 	priv->subdev			= &common_data->subdev;
+ 	priv->subdev->dev		= &client->dev;
+@@ -1554,6 +1927,14 @@
+ 	if (err)
+ 		return err;
+ 
++	err = sysfs_create_group(&client->dev.kobj, &ov5693_dbg_attr_group);
++	if (err)
++		dev_warn(&client->dev,
++			 "failed to create debug sysfs: %d\n", err);
++	else
++		dev_info(&client->dev,
++			 "debug sysfs ready: reg/regs/exposure/gain/streaming/status\n");
++
+ 	dev_dbg(&client->dev, "Detected OV5693 sensor\n");
+ 
+ 
+@@ -1566,6 +1947,8 @@
+ 	struct camera_common_data *s_data = to_camera_common_data(client);
+ 	struct ov5693 *priv = (struct ov5693 *)s_data->priv;
+ 
++	sysfs_remove_group(&client->dev.kobj, &ov5693_dbg_attr_group);
++
+ 	v4l2_async_unregister_subdev(priv->subdev);
+ #if defined(CONFIG_MEDIA_CONTROLLER)
+ 	media_entity_cleanup(&priv->subdev->entity);

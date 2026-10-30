@@ -1,0 +1,53 @@
+mipical: program the T124 MIPI_CAL_CTRL value MIUI uses
+
+The bootloader leaves MIPI_CAL_CTRL at 0x2a000000.  MIUI runs the
+camera with CLKEN_OVR set (0x2a000010), and calibration only
+completes with that bit.  Also keep clk72mhz running until
+AUTO_CAL_DONE latches instead of disabling it right after STARTCAL.
+
+--- a/drivers/media/platform/tegra/mipical/mipi_cal.c
++++ b/drivers/media/platform/tegra/mipical/mipi_cal.c
+@@ -38,6 +38,10 @@
+ #define MIPI_DEBUG 0
+ #define DRV_NAME "tegra_mipi_cal"
+ #define MIPI_CAL_TIMEOUT_MSEC 2000	/* T124 CSI calibration */
++/* MIUI leaves this value in MIPI_CAL_CTRL while the camera is streaming:
++ * NOISE_FLT=0xa, PRESCALE=2, CLKEN_OVR=1, AUTOCAL_EN=0.  The bootloader
++ * value (0x2a000000) lacks CLKEN_OVR and calibration never completes. */
++#define T124_MIPI_CAL_CTRL_VAL 0x2a000010
+ 
+ struct tegra_mipi_bias {
+ 	/* BIAS_PAD_CFG0 */
+@@ -189,14 +193,10 @@
+ 		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &dbg);
+ 		pr_info("mipi_dbg: STATUS after clear = 0x%08x\n", dbg);
+ 	}
++	/* Match MIUI: enable CLKEN_OVR while calibrating.  The block must
++	 * keep the 72 MHz clock running until AUTO_CAL_DONE latches. */
++	regmap_write(mipi->regmap, MIPI_CAL_CTRL, T124_MIPI_CAL_CTRL_VAL);
+ 	regmap_update_bits(mipi->regmap, MIPI_CAL_CTRL, STARTCAL, 0x1);
+-	/* T124: the analogue block latches CAL_DONE once the 72 MHz
+-	 * calibration clock is turned back off. */
+-	if (mipi->clk72mhz) {
+-		clk_disable_unprepare(mipi->clk72mhz);
+-		mipi->clk72mhz = NULL;	/* tegra_mipi_clk_disable() must not double-disable */
+-		udelay(200);
+-	}
+ 	{
+ 		u32 dbg = 0;
+ 		regmap_read(mipi->regmap, MIPI_CAL_CTRL, &dbg);
+@@ -397,11 +397,9 @@
+ 
+ static void select_lanes(struct tegra_mipi *mipi, int lanes)
+ {
+-	/* MIUI leaves CILA at 0 while its CSI calibration succeeds, so do
+-	 * not set SELA for CSI lanes. */
+-	regmap_update_bits(mipi->regmap, CILA_MIPI_CAL_CONFIG, SELA,
+-			((lanes & CSIA) > 0 && !(lanes & (CSIA|CSIB|CSIC|CSID)))
+-			? SELA : 0);
++	/* Keep CILA deselected: MIUI leaves it at 0 while streaming, and
++	 * setting SELA made the CSIA calibration hang (CAL_ACTIVE stuck). */
++	regmap_update_bits(mipi->regmap, CILA_MIPI_CAL_CONFIG, SELA, 0);
+ 	regmap_update_bits(mipi->regmap, CILB_MIPI_CAL_CONFIG, SELB,
+ 			((lanes & CSIB) > 0 ? SELB : 0));
+ 	regmap_update_bits(mipi->regmap, CILC_MIPI_CAL_CONFIG, SELC,

@@ -1,0 +1,21 @@
+camera: allow T124 MIPI calibration on CSI E/F
+
+OV5693 on mocha is wired to CSI E.  tegra_channel_mipi_cal() only
+mapped ports A-D, so a csi-port=4 DT produced 'unknown port 4' and
+the stream never calibrated or enabled the CIL.
+
+--- a/drivers/media/platform/tegra/camera/channel.c
++++ b/drivers/media/platform/tegra/camera/channel.c
+@@ -970,6 +970,12 @@
+ 	case PORT_D:
+ 		lanes = CSID;
+ 		break;
++	case PORT_E:
++		lanes = CSIE;
++		break;
++	case PORT_F:
++		lanes = CSIF;
++		break;
+ 	default:
+ 		dev_err(chan->vi->dev, "MIPI_CAL: unknown port %u\n",
+ 			chan->port[0]);
