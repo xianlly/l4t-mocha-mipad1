@@ -62,3 +62,17 @@ not in the ISP.  `kernel-camfix43-uImage` (packed RAW10 stride: word count
 1600, bytesperline 1600, bypass transform) was built but could not be
 deployed because the 7.7 MB SSH transfer kept stalling.  It is the next
 targeted test.
+
+## camfix43 — packed RAW10 stride
+
+- Deployed as kernel #49; capture size became 1,152,000 bytes
+  (1600 bytes/line x 720), i.e. the packed stride is in effect.
+- `v4l2-ctl --get-fmt-video` still reports 2560 because only the try/set
+  paths were overridden, but the stream uses 1600.
+- The 160-column FFT peak and the bright/striped flat frame remain.
+- `test_mode` was confirmed 0 before the capture.
+
+Conclusion: the pattern is **not** a stride gap.  It survives packed
+stride, R16_I, bypass and pixel-transform modes, and a covered lens.  It is
+below the ISP, in the CSI/VI packing or sensor lane data.  Software ISP
+cannot fix it.
